@@ -102,8 +102,14 @@ curl -fsSL https://raw.githubusercontent.com/AdmGenSameer/gmove/main/install.sh 
 The script automatically:
 1. Detects your OS and architecture (`linux/amd64`, `linux/arm64`, `darwin`, etc.)
 2. Installs the single static executable to `/usr/local/bin` or `~/.local/bin`
-3. Checks for `rclone` and provides one-line install instructions if missing
-4. Automatically generates your initial `~/.config/gmove/config.toml` template if not already present
+3. Automatically downloads and installs the official **Go toolchain** if needed to build from source (or pass `-s -- --install-go`)
+4. Checks for `rclone` and provides one-line install instructions if missing
+5. Automatically generates your initial `~/.config/gmove/config.toml` template if not already present
+
+You can also explicitly install Go along with GMOVE by running:
+```bash
+curl -fsSL https://raw.githubusercontent.com/AdmGenSameer/gmove/main/install.sh | bash -s -- --install-go
+```
 
 ### Building from Source (Alternative)
 ```bash
