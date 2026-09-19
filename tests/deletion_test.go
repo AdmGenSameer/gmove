@@ -53,8 +53,8 @@ func TestDeleter(t *testing.T) {
 	fi, _ := os.Stat(filePath1)
 	var inode, dev uint64
 	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		inode = stat.Ino
-		dev = stat.Dev
+		inode = uint64(stat.Ino)
+		dev = uint64(stat.Dev)
 	}
 
 	// Add verified item to DB

@@ -92,8 +92,8 @@ func TestTVShowsScanAndRecursiveDeletion(t *testing.T) {
 		fi, _ := os.Stat(f.SourceAbsPath)
 		var inode, dev uint64
 		if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-			inode = stat.Ino
-			dev = stat.Dev
+			inode = uint64(stat.Ino)
+			dev = uint64(stat.Dev)
 		}
 		item := &database.TransferItem{
 			OperationID:        opID,

@@ -93,12 +93,12 @@ func (v *Validator) ValidateFileUnchanged(targetPath string, expectedSize int64,
 		return fmt.Errorf("%w: mtime changed from %d to %d for %s", ErrFileModifiedOnDisk, expectedMtime, fi.ModTime().Unix(), targetPath)
 	}
 
-	// 3. Check inode / dev ID (on Linux)
+	// 3. Check inode / dev ID (on Linux and Unix systems)
 	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		if expectedInode > 0 && stat.Ino != expectedInode {
+		if expectedInode > 0 && uint64(stat.Ino) != expectedInode {
 			return fmt.Errorf("%w: inode changed from %d to %d for %s", ErrFileModifiedOnDisk, expectedInode, stat.Ino, targetPath)
 		}
-		if expectedDev > 0 && stat.Dev != expectedDev {
+		if expectedDev > 0 && uint64(stat.Dev) != expectedDev {
 			return fmt.Errorf("%w: device ID changed from %d to %d for %s", ErrFileModifiedOnDisk, expectedDev, stat.Dev, targetPath)
 		}
 	}

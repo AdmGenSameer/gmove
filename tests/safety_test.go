@@ -57,8 +57,8 @@ func TestSafetyValidator(t *testing.T) {
 	fi, _ := os.Stat(testFile)
 	var inode, dev uint64
 	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		inode = stat.Ino
-		dev = stat.Dev
+		inode = uint64(stat.Ino)
+		dev = uint64(stat.Dev)
 	}
 
 	if err := val.ValidateFileUnchanged(testFile, fi.Size(), fi.ModTime().Unix(), inode, dev); err != nil {

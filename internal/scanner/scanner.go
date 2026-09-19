@@ -236,7 +236,7 @@ func (s *Scanner) scanDirectoryBundle(dirName, dirPath string) (*MediaItem, erro
 
 func extractFileStats(fi os.FileInfo) (inode uint64, dev uint64, nlink uint64) {
 	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return stat.Ino, stat.Dev, stat.Nlink
+		return uint64(stat.Ino), uint64(stat.Dev), uint64(stat.Nlink)
 	}
 	return 0, 0, 1
 }
