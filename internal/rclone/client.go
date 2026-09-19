@@ -43,12 +43,19 @@ func (c *SubprocessClient) CheckExecutable(ctx context.Context) (string, error) 
 	return "rclone", nil
 }
 
+func formatCmdError(prefix string, err error) error {
+	if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+		return fmt.Errorf("%s: %s (%w)", prefix, strings.TrimSpace(string(exitErr.Stderr)), err)
+	}
+	return fmt.Errorf("%s: %w", prefix, err)
+}
+
 // ListRemotes lists configured rclone remotes.
 func (c *SubprocessClient) ListRemotes(ctx context.Context) ([]string, error) {
 	cmd := exec.CommandContext(ctx, c.binaryPath, "listremotes")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list rclone remotes: %w", err)
+		return nil, formatCmdError("failed to list rclone remotes", err)
 	}
 
 	var remotes []string
@@ -68,7 +75,7 @@ func (c *SubprocessClient) AboutRemote(ctx context.Context, remote string) (*Rem
 	cmd := exec.CommandContext(ctx, c.binaryPath, "about", remoteTarget, "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to query remote storage info: %w", err)
+		return nil, formatCmdError("failed to query remote storage info", err)
 	}
 
 	var raw map[string]any
@@ -95,7 +102,7 @@ func (c *SubprocessClient) ListJSON(ctx context.Context, remotePath string) ([]*
 	cmd := exec.CommandContext(ctx, c.binaryPath, "lsjson", remotePath, "--hash")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list remote path %s: %w", remotePath, err)
+		return nil, formatCmdError(fmt.Sprintf("failed to list remote path %s", remotePath), err)
 	}
 
 	var items []*RemoteFileItem
