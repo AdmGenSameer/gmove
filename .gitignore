@@ -1,0 +1,17 @@
+# Binaries
+gmove
+*.exe
+*.test
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+
+# OS & Editor
+.DS_Store
+.vscode/
+.idea/
