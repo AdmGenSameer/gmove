@@ -2,7 +2,11 @@
 # To use: mkdir -p ~/.config/gmove && cp config.example.toml ~/.config/gmove/config.toml
 
 # Default Media Configuration (Movies)
-source = "/mnt/media/movies"
+# NOTE: If /mnt/media/movies is a mergerfs union mount, ALWAYS configure GMOVE with
+# the underlying physical local drive path (/mnt/nextcloud-hdd/movies).
+# This ensures only local unmigrated files are scanned and deleted from the physical HDD,
+# while your media server (Jellyfin/Plex) continues serving them seamlessly via mergerfs.
+source = "/mnt/nextcloud-hdd/movies"
 remote = "gdrive"
 remote_path = "Movies"
 
@@ -32,9 +36,9 @@ ignore_dirs = [
     "#recycle"
 ]
 
-# 🎬 Main Movies Library
+# 🎬 Main Movies Library (Underlying physical storage)
 [profiles.movies]
-source = "/mnt/media/movies"
+source = "/mnt/nextcloud-hdd/movies"
 remote = "gdrive"
 remote_path = "Movies"
 

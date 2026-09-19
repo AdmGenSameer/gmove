@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 )
 
+const (
+	Version = "1.0.0"
+)
+
 // Item and Operation Statuses
 type Status string
 

@@ -134,7 +134,7 @@ func TestTVShowsScanAndRecursiveDeletion(t *testing.T) {
 
 func TestConfigProfiles(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Source = "/mnt/media/movies"
+	cfg.Source = "/mnt/nextcloud-hdd/movies"
 	cfg.Remote = "gdrive"
 	cfg.RemotePath = "Movies"
 

@@ -126,7 +126,9 @@ On the first launch of `gmove`, if no configuration is found, an interactive wiz
 
 ### Configuration Reference (`config.toml`)
 ```toml
-source = "/mnt/hdd/Movies"
+# NOTE: If using MergerFS (e.g., /mnt/media/movies pooling local disk + cloud mount),
+# always set 'source' to the underlying physical HDD directory (/mnt/nextcloud-hdd/movies).
+source = "/mnt/nextcloud-hdd/movies"
 remote = "gdrive"
 remote_path = "Movies"
 database = "~/.local/share/gmove/gmove.db"
@@ -142,13 +144,17 @@ ignore_dirs = ["Cloudbackup", "Music", "incomplete", "prowlarr", "sonarr", "rada
 
 # Named profiles for different media categories:
 [profiles.movies]
-source = "/mnt/media/movies"
+source = "/mnt/nextcloud-hdd/movies"
 remote_path = "Movies"
 
 [profiles.shows]
 source = "/mnt/nextcloud-hdd/downloads/torrents/shows"
 remote_path = "Shows"
 ```
+
+> [!TIP]
+> **MergerFS Best Practice**: If `/mnt/media/movies` is a mergerfs union mount combining your local storage (`/mnt/nextcloud-hdd/movies`) and your rclone cloud mount (`/mnt/gdrive/Movies`), always point GMOVE at `/mnt/nextcloud-hdd/movies`. This ensures GMOVE only scans and unlinks files taking up physical space on the local HDD, while Jellyfin / Plex continue playing the migrated media without interruption via the mergerfs mount.
+
 
 ### Switching Profiles
 Run GMOVE for your TV shows library:
