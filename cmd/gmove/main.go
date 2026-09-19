@@ -15,6 +15,7 @@ import (
 	"github.com/AdmGenSameer/gmove/internal/constants"
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/deletion"
+	"github.com/AdmGenSameer/gmove/internal/lifecycle"
 	"github.com/AdmGenSameer/gmove/internal/logger"
 	"github.com/AdmGenSameer/gmove/internal/rclone"
 	"github.com/AdmGenSameer/gmove/internal/safety"
@@ -49,8 +50,8 @@ func run(args []string) error {
 	fs.StringVar(&destOverride, "destination", "", "Override remote destination path")
 	fs.BoolVar(&dryRun, "dry-run", false, "Simulate operation without copying or deleting")
 
-	// Fast-path: Check for help or version before attempting to load config or start wizard
-	for _, a := range args {
+	// Fast-path: Check for help, version, update, or uninstall before attempting to load config or start wizard
+	for i, a := range args {
 		if a == "help" || a == "-h" || a == "--help" {
 			printUsage()
 			return nil
@@ -58,6 +59,12 @@ func run(args []string) error {
 		if a == "version" || a == "-v" || a == "--version" || a == "-version" {
 			fmt.Printf("GMOVE v%s - Safe Media Migration Manager\n", constants.Version)
 			return nil
+		}
+		if a == "update" || a == "upgrade" {
+			return cmdUpdate(args[i+1:])
+		}
+		if a == "uninstall" {
+			return cmdUninstall(args[i+1:])
 		}
 	}
 
@@ -152,6 +159,10 @@ func run(args []string) error {
 			return cmdVerify(cfg, repo, rcloneClient, subParams)
 		case "logs":
 			return cmdLogs(repo, subParams)
+		case "update", "upgrade":
+			return cmdUpdate(subParams)
+		case "uninstall":
+			return cmdUninstall(subParams)
 		case "config":
 			return cmdConfig(cfg, resolvedPath, rcloneClient, subParams)
 		case "help", "--help", "-h":
@@ -199,6 +210,8 @@ Subcommands:
   verify [id]            Re-verify transferred files against Google Drive
   logs [flags]           Inspect SQLite audit logs and error history
   config [show|check]    View configuration or test rclone connectivity
+  update [flags]         Check for updates or upgrade GMOVE to latest release
+  uninstall [flags]      Safely uninstall GMOVE with optional data purge
   version                Print GMOVE version
   help                   Show this help message
 
@@ -518,6 +531,9 @@ func cmdLogs(repo *database.Repository, args []string) error {
 	fs.IntVar(&limit, "limit", 50, "Maximum number of logs to display")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 
@@ -580,3 +596,53 @@ func cmdLogs(repo *database.Repository, args []string) error {
 	fmt.Println()
 	return nil
 }
+
+func cmdUpdate(args []string) error {
+	var checkOnly bool
+	var force bool
+
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.BoolVar(&checkOnly, "check", false, "Check for available updates without downloading or installing")
+	fs.BoolVar(&force, "force", false, "Force re-installation even if already on the latest version")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	return lifecycle.Update(ctx, lifecycle.UpdateOptions{
+		CheckOnly: checkOnly,
+		Force:     force,
+		Stdout:    os.Stdout,
+	})
+}
+
+func cmdUninstall(args []string) error {
+	var yes bool
+	var purge bool
+
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	fs.BoolVar(&yes, "yes", false, "Non-interactive uninstall; skip confirmation prompt")
+	fs.BoolVar(&yes, "y", false, "Non-interactive uninstall; skip confirmation prompt (shorthand)")
+	fs.BoolVar(&purge, "purge", false, "Purge all configuration, logs, and database history")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	return lifecycle.Uninstall(lifecycle.UninstallOptions{
+		NonInteractive: yes,
+		Purge:          purge,
+		Stdin:          os.Stdin,
+		Stdout:         os.Stdout,
+	})
+}
+

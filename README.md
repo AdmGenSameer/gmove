@@ -294,6 +294,34 @@ gmove logs --limit 100
 ```
 All system, rclone, safety, transfer, and deletion events are recorded with zero-loss SQLite WAL storage.
 
+### Updating GMOVE
+Update GMOVE to the latest release or check for updates:
+```bash
+# Check if an update is available without installing
+gmove update --check
+
+# Upgrade to the latest release
+gmove update
+
+# Force reinstall or rebuild even if on the latest version
+gmove update --force
+```
+The updater automatically checks GitHub releases, downloads the pre-built binary for your OS and architecture, or runs the automated fallback installer.
+
+### Uninstalling GMOVE
+Uninstall the GMOVE binary with optional data purging:
+```bash
+# Interactive uninstall (removes executable, prompts to preserve or delete config/database)
+gmove uninstall
+
+# Non-interactive uninstall (preserves config & database)
+gmove uninstall -y
+
+# Complete removal (removes binary AND purges ~/.config/gmove, database, and logs)
+gmove uninstall -y --purge
+```
+You can also run `make uninstall` from the source repository.
+
 ### Dry Run Simulation
 Add `--dry-run` to any command to simulate discovery, planning, and transfer without modifying local or remote storage:
 ```bash
