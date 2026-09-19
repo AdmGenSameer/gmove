@@ -80,4 +80,10 @@ var (
 	// Keymap Helper Style
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
+
+	// Activity Log Box Style
+	LogBoxStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(ColorHighlight).
+			Padding(1, 2)
 )

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/AdmGenSameer/gmove/internal/config"
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/deletion"
@@ -33,6 +35,11 @@ type (
 		Items []*scanner.MediaItem
 		Disk  *utils.DiskSpace
 		Err   error
+	}
+	OperationPreparedMsg struct {
+		Op      *database.Operation
+		DbItems []*database.TransferItem
+		Err     error
 	}
 	TransferEventMsg transfer.TransferEvent
 	DeletionDoneMsg  struct {
@@ -69,9 +76,11 @@ type Model struct {
 	sortDesc     bool
 
 	// Transfer View State
-	activeOp        *database.Operation
-	activeDbItems   []*database.TransferItem
-	currentFile     string
+	activeOp          *database.Operation
+	activeDbItems     []*database.TransferItem
+	eventChan         chan transfer.TransferEvent
+	logLines          []string
+	currentFile       string
 	currentBytes    int64
 	currentTotal    int64
 	currentSpeed    float64
@@ -190,8 +199,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterAndSort()
 		}
 
+	case OperationPreparedMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+			m.statusMsg = fmt.Sprintf("Error preparing operation: %v", msg.Err)
+			m.addLog(fmt.Sprintf("[ERROR] Prepare failed: %v", msg.Err))
+			return m, nil
+		}
+		m.activeOp = msg.Op
+		m.activeDbItems = msg.DbItems
+		m.pendingCount = len(msg.DbItems)
+		m.overallTotal = msg.Op.TotalBytes
+		m.overallBytes = 0
+		m.completedCount = 0
+		m.failedCount = 0
+		m.currentFile = "Starting transfer..."
+		m.addLog(fmt.Sprintf("[DB] Operation #%d recorded (%d items, %s)", msg.Op.ID, len(msg.DbItems), utils.FormatBytes(msg.Op.TotalBytes)))
+		m.addLog("[RCLONE] Connecting to remote destination...")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelFunc = cancel
+		m.eventChan = make(chan transfer.TransferEvent, 200)
+
+		go func() {
+			_ = m.transferMgr.Execute(ctx, msg.Op.ID, func(ev transfer.TransferEvent) {
+				m.eventChan <- ev
+			})
+			close(m.eventChan)
+		}()
+
+		return m, m.waitForEventCmd()
+
 	case TransferEventMsg:
-		m.handleTransferEvent(transfer.TransferEvent(msg))
+		ev := transfer.TransferEvent(msg)
+		m.handleTransferEvent(ev)
+		if m.mode == ViewTransferring {
+			return m, m.waitForEventCmd()
+		}
+		return m, nil
 
 	case DeletionDoneMsg:
 		if msg.Err != nil {
@@ -303,7 +348,10 @@ func (m *Model) updatePlan(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
 		m.mode = ViewTransferring
-		return m, m.startTransferCmd()
+		m.logLines = nil
+		m.currentFile = "Preparing operation in database..."
+		m.addLog("[PLAN] User confirmed transfer plan. Initializing operation...")
+		return m, m.prepareOperationCmd()
 	case "n", "N", "esc", "q":
 		m.mode = ViewSelection
 	}
@@ -341,34 +389,41 @@ func (m *Model) updateDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *Model) startTransferCmd() tea.Cmd {
+func (m *Model) prepareOperationCmd() tea.Cmd {
+	selected := m.getSelectedItems()
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancelFunc = cancel
-
-		selected := m.getSelectedItems()
 		op, dbItems, err := m.transferMgr.PrepareOperation(selected, false)
-		if err != nil {
-			return TransferEventMsg{Type: transfer.EventItemFailed, Error: err}
+		return OperationPreparedMsg{Op: op, DbItems: dbItems, Err: err}
+	}
+}
+
+func (m *Model) waitForEventCmd() tea.Cmd {
+	return func() tea.Msg {
+		if m.eventChan == nil {
+			return nil
 		}
-		m.activeOp = op
-		m.activeDbItems = dbItems
-		m.pendingCount = len(dbItems)
-		m.overallTotal = op.TotalBytes
+		ev, ok := <-m.eventChan
+		if !ok {
+			return nil
+		}
+		return TransferEventMsg(ev)
+	}
+}
 
-		// Start transfer loop in background
-		go func() {
-			_ = m.transferMgr.Execute(ctx, op.ID, func(ev transfer.TransferEvent) {
-				// Note: in a real Bubble Tea program, external events are sent via p.Send().
-				// We handle event transitions directly on the event callback.
-			})
-		}()
-
-		return nil
+func (m *Model) addLog(msg string) {
+	timestamp := time.Now().Format("15:04:05")
+	line := fmt.Sprintf("%s %s", timestamp, msg)
+	m.logLines = append(m.logLines, line)
+	if len(m.logLines) > 100 {
+		m.logLines = m.logLines[len(m.logLines)-100:]
 	}
 }
 
 func (m *Model) handleTransferEvent(ev transfer.TransferEvent) {
+	if ev.Message != "" {
+		m.addLog(ev.Message)
+	}
+
 	switch ev.Type {
 	case transfer.EventItemStarted:
 		if ev.Item != nil {
@@ -405,6 +460,7 @@ func (m *Model) handleTransferEvent(ev transfer.TransferEvent) {
 		m.transferringCount = 0
 
 	case transfer.EventBatchComplete:
+		m.transferringCount = 0
 		// Transition to delete confirmation or finished
 		verified, _ := m.repo.GetVerifiedItems(m.activeOp.ID)
 		m.verifiedItems = verified
@@ -574,57 +630,99 @@ func (m *Model) viewPlan() string {
 	return PanelStyle.Render(b.String())
 }
 
+func formatLogLine(line string, maxLen int) string {
+	if maxLen > 5 && len(line) > maxLen {
+		line = line[:maxLen-3] + "..."
+	}
+	if strings.Contains(line, "[VERIFIED]") || strings.Contains(line, "[SUCCESS]") {
+		return SecondaryStyle.Render(line)
+	}
+	if strings.Contains(line, "[START") || strings.Contains(line, "[TRANSFER]") {
+		return HighlightStyle.Render(line)
+	}
+	if strings.Contains(line, "[FAILED]") || strings.Contains(line, "[ERROR]") {
+		return DangerStyle.Render(line)
+	}
+	if strings.Contains(line, "[VERIFY]") || strings.Contains(line, "[UPLOADED]") {
+		return WarningStyle.Render(line)
+	}
+	if strings.Contains(line, "[rclone]") {
+		return MutedStyle.Render(line)
+	}
+	return NormalRowStyle.Render(line)
+}
+
 func (m *Model) viewTransferring() string {
-	var b strings.Builder
+	// 1. Left Box: Progress & Status
+	var left strings.Builder
+	left.WriteString(TitleStyle.Render("GMOVE — TRANSFERRING") + "\n")
+	left.WriteString(strings.Repeat("─", 48) + "\n\n")
 
-	b.WriteString(TitleStyle.Render("GMOVE — TRANSFERRING") + "\n")
-	b.WriteString(strings.Repeat("─", 60) + "\n\n")
-
-	// Current file
 	curName := m.currentFile
 	if curName == "" {
-		curName = "Preparing..."
+		curName = "Preparing operation in database..."
 	}
-	b.WriteString("Current file:\n")
-	b.WriteString(HighlightStyle.Render("  "+curName) + "\n\n")
+	left.WriteString("Current file:\n")
+	left.WriteString(HighlightStyle.Render("  "+truncate(curName, 44)) + "\n\n")
 
-	// Current file progress bar
 	var filePercent float64
 	if m.currentTotal > 0 {
 		filePercent = float64(m.currentBytes) / float64(m.currentTotal)
 	}
-	b.WriteString(m.fileProgress.ViewAs(filePercent) + "\n")
-	b.WriteString(fmt.Sprintf("  %s / %s   Speed: %s   ETA: %s\n\n",
+	left.WriteString(m.fileProgress.ViewAs(filePercent) + "\n")
+	left.WriteString(fmt.Sprintf("  %s / %s   Speed: %s   ETA: %s\n\n",
 		utils.FormatBytes(m.currentBytes),
 		utils.FormatBytes(m.currentTotal),
 		utils.FormatSpeed(m.currentSpeed),
 		utils.FormatETA(m.currentETA),
 	))
 
-	// Overall progress
-	b.WriteString("Overall batch:\n")
+	left.WriteString("Overall batch:\n")
 	var overallPercent float64
 	if m.overallTotal > 0 {
 		overallPercent = float64(m.overallBytes) / float64(m.overallTotal)
 	}
-	b.WriteString(m.overallProgress.ViewAs(overallPercent) + "\n")
-	b.WriteString(fmt.Sprintf("  %s / %s\n\n",
+	left.WriteString(m.overallProgress.ViewAs(overallPercent) + "\n")
+	left.WriteString(fmt.Sprintf("  %s / %s\n\n",
 		utils.FormatBytes(m.overallBytes),
 		utils.FormatBytes(m.overallTotal),
 	))
 
-	// Stats tally
-	b.WriteString("Status:\n")
-	b.WriteString(fmt.Sprintf("  ✓ %d completed\n", m.completedCount))
-	b.WriteString(fmt.Sprintf("  ↑ %d transferring\n", m.transferringCount))
-	b.WriteString(fmt.Sprintf("  ○ %d pending\n", m.pendingCount))
+	left.WriteString("Status:\n")
+	left.WriteString(fmt.Sprintf("  ✓ %d completed\n", m.completedCount))
+	left.WriteString(fmt.Sprintf("  ↑ %d transferring\n", m.transferringCount))
+	left.WriteString(fmt.Sprintf("  ⟳ %d pending\n", m.pendingCount))
 	if m.failedCount > 0 {
-		b.WriteString(BadgeDanger.Render(fmt.Sprintf("  ✗ %d failed\n", m.failedCount)))
+		left.WriteString(BadgeDanger.Render(fmt.Sprintf("  ✗ %d failed\n", m.failedCount)))
 	}
 
-	b.WriteString("\n" + HelpStyle.Render("Press q to gracefully cancel transfer. No local files will be deleted."))
+	left.WriteString("\n" + HelpStyle.Render("Press q to cancel. No local files deleted."))
+	leftPanel := PanelStyle.Width(50).Render(left.String())
 
-	return PanelStyle.Render(b.String())
+	// 2. Right Box: Live Activity & Rclone Log
+	var right strings.Builder
+	right.WriteString(TitleStyle.Render("LIVE ACTIVITY & RCLONE LOG") + "\n")
+	right.WriteString(strings.Repeat("─", 48) + "\n\n")
+
+	if len(m.logLines) == 0 {
+		right.WriteString(MutedStyle.Render("  Connecting to rclone remote...\n  Waiting for operation events...\n"))
+	} else {
+		maxLines := 14
+		start := 0
+		if len(m.logLines) > maxLines {
+			start = len(m.logLines) - maxLines
+		}
+		for i := start; i < len(m.logLines); i++ {
+			right.WriteString(formatLogLine(m.logLines[i], 46) + "\n")
+		}
+	}
+
+	rightPanel := LogBoxStyle.Width(50).Render(right.String())
+
+	if m.width >= 110 {
+		return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, "  ", rightPanel)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, leftPanel, rightPanel)
 }
 
 func (m *Model) viewDeleteConfirm() string {

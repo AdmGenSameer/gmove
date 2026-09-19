@@ -15,15 +15,17 @@ const (
 	EventItemVerified    EventType = "ITEM_VERIFIED"
 	EventItemFailed      EventType = "ITEM_FAILED"
 	EventBatchComplete   EventType = "BATCH_COMPLETE"
+	EventLogMessage      EventType = "LOG_MESSAGE"
 )
 
 type TransferEvent struct {
-	Type          EventType
-	Item          *database.TransferItem
-	Stats         *rclone.TransferStats
-	Error         error
-	VerifiedCount int
-	FailedCount   int
-	TotalBytes    int64
+	Type           EventType
+	Item           *database.TransferItem
+	Stats          *rclone.TransferStats
+	Error          error
+	Message        string
+	VerifiedCount  int
+	FailedCount    int
+	TotalBytes     int64
 	CompletedBytes int64
 }

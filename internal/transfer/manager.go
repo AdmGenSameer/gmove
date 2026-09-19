@@ -12,6 +12,7 @@ import (
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/rclone"
 	"github.com/AdmGenSameer/gmove/internal/scanner"
+	"github.com/AdmGenSameer/gmove/internal/utils"
 	"github.com/AdmGenSameer/gmove/internal/verification"
 )
 
@@ -139,6 +140,19 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		DryRun:          op.DryRun,
 	}
 
+	opts.OnLog = func(level, msg string) {
+		if eventCallback != nil && strings.TrimSpace(msg) != "" {
+			eventCallback(TransferEvent{
+				Type:           EventLogMessage,
+				Message:        fmt.Sprintf("[rclone] %s", msg),
+				VerifiedCount:  verifiedCount,
+				FailedCount:    failedCount,
+				TotalBytes:     op.TotalBytes,
+				CompletedBytes: completedBytes,
+			})
+		}
+	}
+
 	defer func() {
 		// If context was cancelled, mark INTERRUPTED
 		if errors.Is(ctx.Err(), context.Canceled) {
@@ -147,7 +161,18 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		}
 	}()
 
-	for _, item := range items {
+	if eventCallback != nil {
+		eventCallback(TransferEvent{
+			Type:           EventLogMessage,
+			Message:        fmt.Sprintf("[BATCH] Processing %d items (%s)", len(items), utils.FormatBytes(op.TotalBytes)),
+			VerifiedCount:  verifiedCount,
+			FailedCount:    failedCount,
+			TotalBytes:     op.TotalBytes,
+			CompletedBytes: completedBytes,
+		})
+	}
+
+	for idx, item := range items {
 		// Skip already verified or deleted items
 		if item.Status == constants.StatusVerified || item.Status == constants.StatusDeleted {
 			verifiedCount++
@@ -164,6 +189,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 			eventCallback(TransferEvent{
 				Type:           EventItemStarted,
 				Item:           item,
+				Message:        fmt.Sprintf("[START %d/%d] %s (%s)", idx+1, len(items), item.Name, utils.FormatBytes(item.SizeBytes)),
 				VerifiedCount:  verifiedCount,
 				FailedCount:    failedCount,
 				TotalBytes:     op.TotalBytes,
@@ -207,6 +233,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 					Type:           EventItemFailed,
 					Item:           item,
 					Error:          copyErr,
+					Message:        fmt.Sprintf("[FAILED] ✗ %s: %s", item.Name, errStr),
 					VerifiedCount:  verifiedCount,
 					FailedCount:    failedCount,
 					TotalBytes:     op.TotalBytes,
@@ -223,6 +250,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 			eventCallback(TransferEvent{
 				Type:           EventItemTransferred,
 				Item:           item,
+				Message:        fmt.Sprintf("[UPLOADED] %s ✓", item.Name),
 				VerifiedCount:  verifiedCount,
 				FailedCount:    failedCount,
 				TotalBytes:     op.TotalBytes,
@@ -235,6 +263,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 			eventCallback(TransferEvent{
 				Type:           EventItemVerifying,
 				Item:           item,
+				Message:        fmt.Sprintf("[VERIFY] Checking Google Drive MD5 for %s...", item.Name),
 				VerifiedCount:  verifiedCount,
 				FailedCount:    failedCount,
 				TotalBytes:     op.TotalBytes,
@@ -250,6 +279,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 					Type:           EventItemFailed,
 					Item:           item,
 					Error:          verifErr,
+					Message:        fmt.Sprintf("[FAILED] ✗ Verification mismatch for %s: %v", item.Name, verifErr),
 					VerifiedCount:  verifiedCount,
 					FailedCount:    failedCount,
 					TotalBytes:     op.TotalBytes,
@@ -263,6 +293,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 				eventCallback(TransferEvent{
 					Type:           EventItemVerified,
 					Item:           item,
+					Message:        fmt.Sprintf("[VERIFIED] ✓ %s (checksum matched)", item.Name),
 					VerifiedCount:  verifiedCount,
 					FailedCount:    failedCount,
 					TotalBytes:     op.TotalBytes,
@@ -270,6 +301,17 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 				})
 			}
 		}
+	}
+
+	if eventCallback != nil {
+		eventCallback(TransferEvent{
+			Type:           EventBatchComplete,
+			Message:        fmt.Sprintf("[COMPLETE] Batch finished: %d verified, %d failed", verifiedCount, failedCount),
+			VerifiedCount:  verifiedCount,
+			FailedCount:    failedCount,
+			TotalBytes:     op.TotalBytes,
+			CompletedBytes: completedBytes,
+		})
 	}
 
 	// Final status update

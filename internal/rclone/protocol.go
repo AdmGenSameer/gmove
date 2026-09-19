@@ -12,6 +12,7 @@ type TransferOptions struct {
 	LowLevelRetries int
 	DriveChunkSize  string
 	DryRun          bool
+	OnLog           func(level, msg string)
 }
 
 // InProgressFile tracks a file currently being transferred by rclone.

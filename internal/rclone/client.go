@@ -164,11 +164,19 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 			if entry.Stats != nil && onProgress != nil {
 				onProgress(entry.Stats)
 			}
+			if entry.Msg != "" && opts != nil && opts.OnLog != nil {
+				opts.OnLog(entry.Level, entry.Msg)
+			}
 			if entry.Level == "error" {
 				lastErrorMessage = entry.Msg
 				if strings.Contains(entry.Msg, "userRateLimitExceeded") || strings.Contains(entry.Msg, "quotaExceeded") {
 					return ErrQuotaExceeded
 				}
+			}
+		} else {
+			text := strings.TrimSpace(string(line))
+			if text != "" && opts != nil && opts.OnLog != nil {
+				opts.OnLog("info", text)
 			}
 		}
 	}

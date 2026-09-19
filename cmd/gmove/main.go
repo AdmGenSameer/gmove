@@ -73,7 +73,7 @@ func run(args []string) error {
 			fmt.Println("│                         GMOVE                              │")
 			fmt.Println("│              Safe Media Migration Manager                  │")
 			fmt.Println("╰────────────────────────────────────────────────────────────╯")
-			fmt.Println("\nNo configuration found. Launching initial setup wizard...\n")
+			fmt.Printf("\nNo configuration found. Launching initial setup wizard...\n\n")
 
 			newCfg, wizErr := config.RunWizard(resolvedPath)
 			if wizErr != nil {
@@ -165,7 +165,7 @@ func run(args []string) error {
 		fmt.Printf("\nERROR: rclone was not found on your system PATH.\n\n")
 		fmt.Println("GMOVE requires rclone to transfer data safely to Google Drive.")
 		fmt.Println("Please install rclone and configure your remote before using GMOVE:")
-		fmt.Println("  https://rclone.org/downloads/\n")
+		fmt.Printf("  https://rclone.org/downloads/\n\n")
 		return err
 	}
 
@@ -258,7 +258,8 @@ func cmdScan(cfg *config.Config) error {
 func cmdStatus(cfg *config.Config, repo *database.Repository) error {
 	fmt.Println("╭────────────────────────────────────────────────────────────╮")
 	fmt.Println("│                        GMOVE STATUS                        │")
-	fmt.Println("╰────────────────────────────────────────────────────────────╯\n")
+	fmt.Println("╰────────────────────────────────────────────────────────────╯")
+	fmt.Println()
 
 	fmt.Printf("Source:      %s\n", cfg.Source)
 	fmt.Printf("Destination: %s\n\n", cfg.RemoteDestination())
