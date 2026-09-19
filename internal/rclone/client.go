@@ -172,7 +172,13 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 				onProgress(entry.Stats)
 			}
 			if entry.Msg != "" && opts != nil && opts.OnLog != nil {
-				opts.OnLog(entry.Level, entry.Msg)
+				trimmed := strings.TrimSpace(entry.Msg)
+				if !strings.HasPrefix(trimmed, "Transferred:") &&
+					!strings.HasPrefix(trimmed, "Elapsed time:") &&
+					!strings.HasPrefix(trimmed, "Transferring:") {
+					singleLine := strings.Join(strings.Fields(trimmed), " ")
+					opts.OnLog(entry.Level, singleLine)
+				}
 			}
 			if entry.Level == "error" {
 				lastErrorMessage = entry.Msg
@@ -183,7 +189,12 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 		} else {
 			text := strings.TrimSpace(string(line))
 			if text != "" && opts != nil && opts.OnLog != nil {
-				opts.OnLog("info", text)
+				if !strings.HasPrefix(text, "Transferred:") &&
+					!strings.HasPrefix(text, "Elapsed time:") &&
+					!strings.HasPrefix(text, "Transferring:") {
+					singleLine := strings.Join(strings.Fields(text), " ")
+					opts.OnLog("info", singleLine)
+				}
 			}
 		}
 	}

@@ -110,7 +110,7 @@ func NewModel(cfg *config.Config, repo *database.Repository, rClient rclone.Rclo
 	delInput.Placeholder = "Type DELETE to confirm"
 	delInput.CharLimit = 10
 
-	fp := progress.New(progress.WithDefaultGradient())
+	fp := progress.New(progress.WithGradient("#8BE9FD", "#7D56F4"))
 	op := progress.New(progress.WithGradient("#7D56F4", "#04B575"))
 
 	scn := scanner.New(cfg.Source)
@@ -637,7 +637,7 @@ func formatLogLine(line string, maxLen int) string {
 	if strings.Contains(line, "[VERIFIED]") || strings.Contains(line, "[SUCCESS]") {
 		return SecondaryStyle.Render(line)
 	}
-	if strings.Contains(line, "[START") || strings.Contains(line, "[TRANSFER]") {
+	if strings.Contains(line, "[START") || strings.Contains(line, "[TRANSFER]") || strings.Contains(line, "[BATCH]") {
 		return HighlightStyle.Render(line)
 	}
 	if strings.Contains(line, "[FAILED]") || strings.Contains(line, "[ERROR]") {
@@ -653,17 +653,64 @@ func formatLogLine(line string, maxLen int) string {
 }
 
 func (m *Model) viewTransferring() string {
+	totalWidth := m.width
+	if totalWidth <= 0 {
+		totalWidth = 100
+	}
+	totalHeight := m.height
+	if totalHeight <= 0 {
+		totalHeight = 26
+	}
+
+	gutter := 2
+	isSideBySide := totalWidth >= 80
+
+	var paneWidth int
+	if isSideBySide {
+		paneWidth = (totalWidth - gutter) / 2
+	} else {
+		paneWidth = totalWidth - 2
+	}
+	if paneWidth < 38 {
+		paneWidth = 38
+	}
+
+	// Calculate inner content width:
+	// Styles have rounded border (1 left + 1 right = 2) and padding (2 left + 2 right = 4) => 6
+	innerW := paneWidth - 6
+	if innerW < 30 {
+		innerW = 30
+	}
+
+	// Calculate target height for both panels so their borders and bottom align perfectly!
+	targetHeight := totalHeight - 2
+	if targetHeight < 20 {
+		targetHeight = 20
+	}
+	// Inner height for content: border (1 top + 1 bottom = 2) and padding (1 top + 1 bottom = 2) => 4
+	innerH := targetHeight - 4
+	if innerH < 14 {
+		innerH = 14
+	}
+
+	// Dynamically scale the progress bars to fill the left panel
+	progWidth := innerW - 4
+	if progWidth > 15 {
+		m.fileProgress.Width = progWidth
+		m.overallProgress.Width = progWidth
+	}
+
 	// 1. Left Box: Progress & Status
 	var left strings.Builder
 	left.WriteString(TitleStyle.Render("GMOVE — TRANSFERRING") + "\n")
-	left.WriteString(strings.Repeat("─", 48) + "\n\n")
+	left.WriteString(strings.Repeat("─", innerW) + "\n\n")
 
 	curName := m.currentFile
 	if curName == "" {
 		curName = "Preparing operation in database..."
 	}
-	left.WriteString("Current file:\n")
-	left.WriteString(HighlightStyle.Render("  "+truncate(curName, 44)) + "\n\n")
+	left.WriteString(NormalRowStyle.Render("Current file:") + "\n")
+	left.WriteString(HighlightStyle.Render("  "+truncate(curName, innerW-4)) + "\n\n")
 
 	var filePercent float64
 	if m.currentTotal > 0 {
@@ -677,7 +724,7 @@ func (m *Model) viewTransferring() string {
 		utils.FormatETA(m.currentETA),
 	))
 
-	left.WriteString("Overall batch:\n")
+	left.WriteString(NormalRowStyle.Render("Overall batch:") + "\n")
 	var overallPercent float64
 	if m.overallTotal > 0 {
 		overallPercent = float64(m.overallBytes) / float64(m.overallTotal)
@@ -688,39 +735,45 @@ func (m *Model) viewTransferring() string {
 		utils.FormatBytes(m.overallTotal),
 	))
 
-	left.WriteString("Status:\n")
-	left.WriteString(fmt.Sprintf("  ✓ %d completed\n", m.completedCount))
-	left.WriteString(fmt.Sprintf("  ↑ %d transferring\n", m.transferringCount))
-	left.WriteString(fmt.Sprintf("  ⟳ %d pending\n", m.pendingCount))
+	left.WriteString(NormalRowStyle.Render("Status:") + "\n")
+	left.WriteString(SecondaryStyle.Render(fmt.Sprintf("  ✓ %d completed\n", m.completedCount)))
+	left.WriteString(HighlightStyle.Render(fmt.Sprintf("  ↑ %d transferring\n", m.transferringCount)))
+	left.WriteString(MutedStyle.Render(fmt.Sprintf("  ⟳ %d pending\n", m.pendingCount)))
 	if m.failedCount > 0 {
 		left.WriteString(BadgeDanger.Render(fmt.Sprintf("  ✗ %d failed\n", m.failedCount)))
 	}
 
 	left.WriteString("\n" + HelpStyle.Render("Press q to cancel. No local files deleted."))
-	leftPanel := PanelStyle.Width(50).Render(left.String())
+	leftPanel := TransferLeftBoxStyle.Width(innerW).Height(innerH).Render(left.String())
 
 	// 2. Right Box: Live Activity & Rclone Log
 	var right strings.Builder
-	right.WriteString(TitleStyle.Render("LIVE ACTIVITY & RCLONE LOG") + "\n")
-	right.WriteString(strings.Repeat("─", 48) + "\n\n")
+	right.WriteString(HighlightStyle.Bold(true).Render("LIVE ACTIVITY & RCLONE LOG") + "\n")
+	right.WriteString(strings.Repeat("─", innerW) + "\n\n")
+
+	// Calculate maximum log lines based on available inner height
+	// Title (1) + Hr (1) + blank (1) = 3 lines at top
+	maxLines := innerH - 4
+	if maxLines < 5 {
+		maxLines = 5
+	}
 
 	if len(m.logLines) == 0 {
 		right.WriteString(MutedStyle.Render("  Connecting to rclone remote...\n  Waiting for operation events...\n"))
 	} else {
-		maxLines := 14
 		start := 0
 		if len(m.logLines) > maxLines {
 			start = len(m.logLines) - maxLines
 		}
 		for i := start; i < len(m.logLines); i++ {
-			right.WriteString(formatLogLine(m.logLines[i], 46) + "\n")
+			right.WriteString(formatLogLine(m.logLines[i], innerW-2) + "\n")
 		}
 	}
 
-	rightPanel := LogBoxStyle.Width(50).Render(right.String())
+	rightPanel := LogBoxStyle.Width(innerW).Height(innerH).Render(right.String())
 
-	if m.width >= 110 {
-		return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, "  ", rightPanel)
+	if isSideBySide {
+		return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, strings.Repeat(" ", gutter), rightPanel)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, leftPanel, rightPanel)
 }

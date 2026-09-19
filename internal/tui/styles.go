@@ -81,6 +81,12 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
+	// Transfer Screen Panels
+	TransferLeftBoxStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(ColorPrimary).
+			Padding(1, 2)
+
 	// Activity Log Box Style
 	LogBoxStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
