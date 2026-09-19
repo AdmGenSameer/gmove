@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samarcher/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/constants"
 )
 
 // Repository provides structured database queries.

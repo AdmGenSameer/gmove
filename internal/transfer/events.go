@@ -1,8 +1,8 @@
 package transfer
 
 import (
-	"github.com/samarcher/gmove/internal/database"
-	"github.com/samarcher/gmove/internal/rclone"
+	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/rclone"
 )
 
 type EventType string

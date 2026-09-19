@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/samarcher/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/constants"
 )
 
 // RunWizard prompts the user interactively for source dir, remote name, and remote path.

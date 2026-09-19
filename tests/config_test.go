@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/samarcher/gmove/internal/config"
+	"github.com/AdmGenSameer/gmove/internal/config"
 )
 
 func TestConfigValidationAndSave(t *testing.T) {

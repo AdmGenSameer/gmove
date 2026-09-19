@@ -3,7 +3,7 @@ package database
 import (
 	"time"
 
-	"github.com/samarcher/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/constants"
 )
 
 // Operation records a migration batch run.

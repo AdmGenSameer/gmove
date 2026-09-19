@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/samarcher/gmove/internal/safety"
+	"github.com/AdmGenSameer/gmove/internal/safety"
 )
 
 func TestSafetyValidator(t *testing.T) {

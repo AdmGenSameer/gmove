@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/samarcher/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/constants"
 )
 
 // Scanner scans the source directory for migration candidates.

@@ -91,26 +91,28 @@ The TUI has zero deletion authority. File deletion is mediated exclusively by `s
 
 ---
 
-## Installation & Building
+## Installation & Setup
 
-### Prerequisites
-* Linux (x86_64 or ARM64)
-* `rclone` installed and configured with your Google Drive remote (e.g. `gdrive:`)
-* Go 1.21+ (to compile from source)
-
-### Compiling from Source
+### Quick Install via curl (Recommended)
+Install or update GMOVE on any Linux server or macOS with a single command:
 ```bash
-git clone https://github.com/samarcher/gmove.git
+curl -fsSL https://raw.githubusercontent.com/AdmGenSameer/gmove/main/install.sh | bash
+```
+
+The script automatically:
+1. Detects your OS and architecture (`linux/amd64`, `linux/arm64`, `darwin`, etc.)
+2. Installs the single static executable to `/usr/local/bin` or `~/.local/bin`
+3. Checks for `rclone` and provides one-line install instructions if missing
+4. Automatically generates your initial `~/.config/gmove/config.toml` template if not already present
+
+### Building from Source (Alternative)
+```bash
+git clone https://github.com/AdmGenSameer/gmove.git
 cd gmove
 make build
-```
-
-This compiles a single static binary: `./gmove`.
-
-To install to `~/.local/bin/gmove`:
-```bash
 make install
 ```
+This installs the single static binary to `~/.local/bin/gmove`.
 
 ---
 

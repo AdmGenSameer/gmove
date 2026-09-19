@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samarcher/gmove/internal/config"
-	"github.com/samarcher/gmove/internal/constants"
-	"github.com/samarcher/gmove/internal/database"
-	"github.com/samarcher/gmove/internal/deletion"
-	"github.com/samarcher/gmove/internal/safety"
-	"github.com/samarcher/gmove/internal/scanner"
+	"github.com/AdmGenSameer/gmove/internal/config"
+	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/deletion"
+	"github.com/AdmGenSameer/gmove/internal/safety"
+	"github.com/AdmGenSameer/gmove/internal/scanner"
 )
 
 func TestTVShowsScanAndRecursiveDeletion(t *testing.T) {

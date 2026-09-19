@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/samarcher/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/constants"
 )
 
 var ErrConfigNotFound = errors.New("configuration file not found")

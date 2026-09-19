@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samarcher/gmove/internal/constants"
-	"github.com/samarcher/gmove/internal/database"
-	"github.com/samarcher/gmove/internal/safety"
+	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/safety"
 )
 
 var (

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samarcher/gmove/internal/constants"
-	"github.com/samarcher/gmove/internal/database"
-	"github.com/samarcher/gmove/internal/rclone"
+	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/rclone"
 )
 
 // Verifier audits transferred files against Google Drive.

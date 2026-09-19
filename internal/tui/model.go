@@ -8,13 +8,13 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/samarcher/gmove/internal/config"
-	"github.com/samarcher/gmove/internal/database"
-	"github.com/samarcher/gmove/internal/deletion"
-	"github.com/samarcher/gmove/internal/rclone"
-	"github.com/samarcher/gmove/internal/scanner"
-	"github.com/samarcher/gmove/internal/transfer"
-	"github.com/samarcher/gmove/internal/utils"
+	"github.com/AdmGenSameer/gmove/internal/config"
+	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/deletion"
+	"github.com/AdmGenSameer/gmove/internal/rclone"
+	"github.com/AdmGenSameer/gmove/internal/scanner"
+	"github.com/AdmGenSameer/gmove/internal/transfer"
+	"github.com/AdmGenSameer/gmove/internal/utils"
 )
 
 type ViewMode int

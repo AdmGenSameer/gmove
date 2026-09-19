@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+
+      - name: Build Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          BUILD_DIR="build/gmove-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "${BUILD_DIR}"
+          go build -ldflags="-s -w -X 'github.com/AdmGenSameer/gmove/internal/constants.Version=${VERSION#v}'" -o "${BUILD_DIR}/gmove" ./cmd/gmove
+          cp README.md LICENSE config.example.toml "${BUILD_DIR}/"
+          tar -czf "gmove-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" -C "build" "gmove-${{ matrix.goos }}-${{ matrix.goarch }}"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: gmove-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

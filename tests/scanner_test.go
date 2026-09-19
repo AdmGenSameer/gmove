@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/samarcher/gmove/internal/scanner"
+	"github.com/AdmGenSameer/gmove/internal/scanner"
 )
 
 func TestScanner(t *testing.T) {

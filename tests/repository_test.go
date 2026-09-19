@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samarcher/gmove/internal/constants"
-	"github.com/samarcher/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/database"
 )
 
 func TestDatabaseRepository(t *testing.T) {

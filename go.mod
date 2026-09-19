@@ -1,4 +1,4 @@
-module github.com/samarcher/gmove
+module github.com/AdmGenSameer/gmove
 
 go 1.27.1
 

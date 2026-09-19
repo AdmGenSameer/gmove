@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samarcher/gmove/internal/config"
-	"github.com/samarcher/gmove/internal/constants"
-	"github.com/samarcher/gmove/internal/database"
-	"github.com/samarcher/gmove/internal/rclone"
-	"github.com/samarcher/gmove/internal/scanner"
-	"github.com/samarcher/gmove/internal/verification"
+	"github.com/AdmGenSameer/gmove/internal/config"
+	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/rclone"
+	"github.com/AdmGenSameer/gmove/internal/scanner"
+	"github.com/AdmGenSameer/gmove/internal/verification"
 )
 
 // Manager coordinates pre-flight, transfers, and post-transfer verification.

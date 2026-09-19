@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/samarcher/gmove/internal/scanner"
+	"github.com/AdmGenSameer/gmove/internal/scanner"
 )
 
 func TestParseSelection(t *testing.T) {
