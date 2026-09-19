@@ -40,7 +40,7 @@ func Open(dbPath string) (*DB, error) {
 }
 
 func (db *DB) migrate() error {
-	schema := `
+	tables := `
 	CREATE TABLE IF NOT EXISTS operations (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		started_at DATETIME NOT NULL,
@@ -86,7 +86,16 @@ func (db *DB) migrate() error {
 		message TEXT NOT NULL,
 		details TEXT
 	);
+	`
 
+	if _, err := db.Exec(tables); err != nil {
+		return fmt.Errorf("failed to create tables: %w", err)
+	}
+
+	// Safe backward-compatible migration for existing databases created before component column
+	_, _ = db.Exec(`ALTER TABLE events ADD COLUMN component TEXT NOT NULL DEFAULT 'system'`)
+
+	indexes := `
 	CREATE INDEX IF NOT EXISTS idx_transfer_items_op_status ON transfer_items(operation_id, status);
 	CREATE INDEX IF NOT EXISTS idx_transfer_items_rel_path ON transfer_items(relative_path);
 	CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status);
@@ -96,11 +105,9 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_events_op_level ON events(operation_id, level);
 	`
 
-	if _, err := db.Exec(schema); err != nil {
-		return err
+	if _, err := db.Exec(indexes); err != nil {
+		return fmt.Errorf("failed to create indexes: %w", err)
 	}
 
-	// Safe backward-compatible migration for existing databases
-	_, _ = db.Exec(`ALTER TABLE events ADD COLUMN component TEXT NOT NULL DEFAULT 'system'`)
 	return nil
 }

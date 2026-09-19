@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -104,5 +105,85 @@ func TestDatabaseRepository(t *testing.T) {
 	}
 	if verifiedItems[0].SourceHash != "hash-src-123" {
 		t.Errorf("expected source hash 'hash-src-123', got '%s'", verifiedItems[0].SourceHash)
+	}
+}
+
+func TestLegacyDatabaseMigration(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "legacy.db")
+
+	// 1. Create a database using the legacy v1.0.3 schema where events table did not have 'component' column
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySchema := `
+	CREATE TABLE operations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		status TEXT NOT NULL,
+		source TEXT NOT NULL,
+		destination TEXT NOT NULL,
+		total_items INTEGER NOT NULL,
+		total_files INTEGER NOT NULL,
+		total_bytes INTEGER NOT NULL DEFAULT 0,
+		transferred_bytes INTEGER NOT NULL DEFAULT 0,
+		error TEXT
+	);
+	CREATE TABLE transfer_items (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		operation_id INTEGER NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+		name TEXT NOT NULL,
+		is_directory BOOLEAN NOT NULL DEFAULT 0,
+		relative_path TEXT NOT NULL,
+		source_abs_path TEXT NOT NULL,
+		destination_rel_path TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		mtime_epoch INTEGER NOT NULL,
+		inode INTEGER NOT NULL DEFAULT 0,
+		device_id INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL,
+		verification_status TEXT NOT NULL,
+		source_hash TEXT,
+		remote_hash TEXT,
+		error TEXT,
+		transferred_at DATETIME,
+		verified_at DATETIME,
+		deleted_at DATETIME
+	);
+	CREATE TABLE events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		operation_id INTEGER REFERENCES operations(id) ON DELETE CASCADE,
+		timestamp DATETIME NOT NULL,
+		level TEXT NOT NULL,
+		message TEXT NOT NULL,
+		details TEXT
+	);
+	`
+	if _, err := rawDB.Exec(legacySchema); err != nil {
+		t.Fatal(err)
+	}
+	rawDB.Close()
+
+	// 2. Open with database.Open, which runs migrate()
+	db, err := database.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to migrate legacy database: %v", err)
+	}
+	defer db.Close()
+
+	// 3. Verify that component column exists and can be written and queried
+	repo := database.NewRepository(db)
+	if err := repo.LogEvent(nil, "INFO", "test_comp", "migration success", ""); err != nil {
+		t.Fatalf("failed to log event to migrated table: %v", err)
+	}
+
+	records, err := repo.QueryEvents(database.EventFilter{Component: "test_comp"})
+	if err != nil {
+		t.Fatalf("failed to query migrated table: %v", err)
+	}
+	if len(records) != 1 || records[0].Component != "test_comp" {
+		t.Fatalf("expected 1 record with component 'test_comp', got %v", records)
 	}
 }
