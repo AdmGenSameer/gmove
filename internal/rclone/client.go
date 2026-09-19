@@ -178,6 +178,7 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 
 	scanner := bufio.NewScanner(stderrPipe)
 	var lastErrorMessage string
+	var stderrLines []string
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -195,9 +196,9 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 					opts.OnLog(entry.Level, singleLine)
 				}
 			}
-			if entry.Level == "error" {
+			if entry.Level == "error" || entry.Level == "fatal" || entry.Level == "critical" {
 				lastErrorMessage = entry.Msg
-				logger.Errorf("rclone", "rclone stderr error: %s", entry.Msg)
+				logger.Errorf("rclone", "rclone %s: %s", entry.Level, entry.Msg)
 				if strings.Contains(entry.Msg, "userRateLimitExceeded") || strings.Contains(entry.Msg, "quotaExceeded") {
 					logger.Errorf("rclone", "750GB daily Google Drive quota or API rate limit exceeded: %s", entry.Msg)
 					return ErrQuotaExceeded
@@ -205,12 +206,19 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 			}
 		} else {
 			text := strings.TrimSpace(string(line))
-			if text != "" && opts != nil && opts.OnLog != nil {
-				if !strings.HasPrefix(text, "Transferred:") &&
-					!strings.HasPrefix(text, "Elapsed time:") &&
-					!strings.HasPrefix(text, "Transferring:") {
-					singleLine := strings.Join(strings.Fields(text), " ")
-					opts.OnLog("info", singleLine)
+			if text != "" {
+				stderrLines = append(stderrLines, text)
+				if lastErrorMessage == "" {
+					lastErrorMessage = text
+				}
+				logger.Errorf("rclone", "rclone stderr: %s", text)
+				if opts != nil && opts.OnLog != nil {
+					if !strings.HasPrefix(text, "Transferred:") &&
+						!strings.HasPrefix(text, "Elapsed time:") &&
+						!strings.HasPrefix(text, "Transferring:") {
+						singleLine := strings.Join(strings.Fields(text), " ")
+						opts.OnLog("error", singleLine)
+					}
 				}
 			}
 		}
@@ -221,9 +229,13 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 			logger.Warnf("rclone", "Copy canceled by context: %s -> %s", srcPath, dstRemotePath)
 			return context.Canceled
 		}
-		if lastErrorMessage != "" {
-			logger.Errorf("rclone", "Copy failed with message (%s -> %s): %s (%v)", srcPath, dstRemotePath, lastErrorMessage, err)
-			return fmt.Errorf("rclone copy failed: %s: %w", lastErrorMessage, err)
+		detail := lastErrorMessage
+		if detail == "" && len(stderrLines) > 0 {
+			detail = strings.Join(stderrLines, "; ")
+		}
+		if detail != "" {
+			logger.Errorf("rclone", "Copy failed with message (%s -> %s): %s (%v)", srcPath, dstRemotePath, detail, err)
+			return fmt.Errorf("rclone copy failed: %s", detail)
 		}
 		logger.Errorf("rclone", "Copy failed (%s -> %s): %v", srcPath, dstRemotePath, err)
 		return fmt.Errorf("rclone copy failed: %w", err)
@@ -260,10 +272,14 @@ func (c *SubprocessClient) Check(ctx context.Context, srcPath, dstRemotePath str
 
 	res := &CheckResult{}
 	scanner := bufio.NewScanner(stderrPipe)
+	var lastCheckErr string
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var entry rcloneLogEntry
 		if err := json.Unmarshal(line, &entry); err == nil {
+			if entry.Level == "error" || entry.Level == "fatal" {
+				lastCheckErr = entry.Msg
+			}
 			msg := entry.Msg
 			if strings.Contains(msg, "differences found") {
 				var count int
@@ -274,6 +290,11 @@ func (c *SubprocessClient) Check(ctx context.Context, srcPath, dstRemotePath str
 				_, _ = fmt.Sscanf(msg, "%d matching files", &count)
 				res.MatchCount = count
 			}
+		} else {
+			text := strings.TrimSpace(string(line))
+			if text != "" && lastCheckErr == "" {
+				lastCheckErr = text
+			}
 		}
 	}
 
@@ -282,6 +303,10 @@ func (c *SubprocessClient) Check(ctx context.Context, srcPath, dstRemotePath str
 		if res.DifferCount > 0 {
 			logger.Warnf("rclone", "Check verification mismatch: %d differing files found between %s and %s", res.DifferCount, srcPath, dstRemotePath)
 			return res, fmt.Errorf("%w: %d differing files found", ErrVerificationMismatch, res.DifferCount)
+		}
+		if lastCheckErr != "" {
+			logger.Errorf("rclone", "rclone check returned error: %s (%v)", lastCheckErr, cmdErr)
+			return res, fmt.Errorf("rclone check failed: %s", lastCheckErr)
 		}
 		logger.Errorf("rclone", "rclone check returned error: %v", cmdErr)
 		return res, fmt.Errorf("rclone check returned error: %w", cmdErr)
