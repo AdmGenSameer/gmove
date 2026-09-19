@@ -52,6 +52,7 @@ func (db *DB) migrate() error {
 		total_files INTEGER NOT NULL DEFAULT 0,
 		total_bytes INTEGER NOT NULL DEFAULT 0,
 		dry_run BOOLEAN NOT NULL DEFAULT 0,
+		pid INTEGER NOT NULL DEFAULT 0,
 		notes TEXT
 	);
 
@@ -92,7 +93,8 @@ func (db *DB) migrate() error {
 		return fmt.Errorf("failed to create tables: %w", err)
 	}
 
-	// Safe backward-compatible migration for existing databases created before component column
+	// Safe backward-compatible migration for existing databases
+	_, _ = db.Exec(`ALTER TABLE operations ADD COLUMN pid INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE events ADD COLUMN component TEXT NOT NULL DEFAULT 'system'`)
 
 	indexes := `

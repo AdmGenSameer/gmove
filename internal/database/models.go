@@ -18,6 +18,7 @@ type Operation struct {
 	TotalFiles  int              `json:"total_files"`
 	TotalBytes  int64            `json:"total_bytes"`
 	DryRun      bool             `json:"dry_run"`
+	PID         int              `json:"pid,omitempty"`
 	Notes       string           `json:"notes,omitempty"`
 }
 

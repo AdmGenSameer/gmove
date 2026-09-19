@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/AdmGenSameer/gmove/internal/config"
+	"github.com/AdmGenSameer/gmove/internal/daemon"
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/deletion"
 	"github.com/AdmGenSameer/gmove/internal/logger"
@@ -100,6 +101,23 @@ type Model struct {
 	deleteResult  *deletion.DeleteResult
 	deleteError   string
 	verifiedItems []*database.TransferItem
+
+	// Detached background state
+	configPath   string
+	detachedPID  int
+	detachedOpID int64
+}
+
+func (m *Model) SetConfigPath(path string) {
+	m.configPath = path
+}
+
+func (m *Model) DetachedPID() int {
+	return m.detachedPID
+}
+
+func (m *Model) DetachedOpID() int64 {
+	return m.detachedOpID
 }
 
 func NewModel(cfg *config.Config, repo *database.Repository, rClient rclone.RcloneClient, del *deletion.Deleter) *Model {
@@ -372,6 +390,22 @@ func (m *Model) updateTransferring(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.statusMsg = "Transfer interrupted. No local files were deleted."
 		return m, tea.Quit
+	}
+	if msg.String() == "d" || msg.String() == "b" {
+		if m.activeOp != nil {
+			if m.cancelFunc != nil {
+				m.cancelFunc()
+			}
+			pid, err := daemon.SpawnWorker(m.activeOp.ID, m.configPath)
+			if err != nil {
+				m.addLog(fmt.Sprintf("[ERROR] Failed to detach background worker: %v", err))
+				return m, nil
+			}
+			m.detachedPID = pid
+			m.detachedOpID = m.activeOp.ID
+			logger.For("tui").WithOp(m.activeOp.ID).Infof("Transfer detached to background daemon (PID: %d)", pid)
+			return m, tea.Quit
+		}
 	}
 	return m, nil
 }
@@ -750,7 +784,7 @@ func (m *Model) viewTransferring() string {
 		left.WriteString(BadgeDanger.Render(fmt.Sprintf("  ✗ %d failed\n", m.failedCount)))
 	}
 
-	left.WriteString("\n" + HelpStyle.Render("Press q to cancel. No local files deleted."))
+	left.WriteString("\n" + HelpStyle.Render("Press q to cancel. Press d to send to background (safely close terminal)."))
 	leftPanel := TransferLeftBoxStyle.Width(innerW).Height(innerH).Render(left.String())
 
 	// 2. Right Box: Live Activity & Rclone Log

@@ -253,15 +253,53 @@ gmove history
 gmove history 42
 ```
 
+### Background Transfers & SSH Session Immunity
+When migrating massive files over SSH, you don't need to keep your laptop or terminal window open:
+* **Detach anytime from TUI**: While transfers are running in the interactive interface, press **`d`** (or `b`). GMOVE immediately hands off the migration to an independent daemon worker decoupled from the controlling terminal session (`Setsid = true`, `SIGHUP` ignored) and exits the TUI cleanly.
+* **Resume in Background via CLI**:
+  ```bash
+  # Resume in background detached daemon
+  gmove resume -d
+  # Or with a specific operation ID
+  gmove resume 42 -d
+  ```
+* **Inspect Live Progress**:
+  ```bash
+  gmove status
+  ```
+  If a background worker is active, `gmove status` displays the active operation, worker PID, number of verified items, currently transferring file, and transfer speed.
+* **Stop Background Worker**:
+  ```bash
+  gmove stop
+  ```
+  Gracefully signals the worker (`SIGTERM`) to stop without touching or deleting any local files. You can safely resume anytime.
+* **Stream Real-Time Audit Logs**:
+  ```bash
+  gmove logs
+  ```
+
 ### Resuming Interrupted Operations
 ```bash
-# Resume latest interrupted or incomplete operation
+# Resume latest interrupted or incomplete operation in foreground
 gmove resume
+
+# Resume in background detached daemon (safe to close SSH)
+gmove resume -d
 
 # Resume a specific operation
 gmove resume 42
 ```
 Filters out all already-verified items and resumes remaining items seamlessly.
+
+### Stopping Background Migrations
+```bash
+# Stop active background migration cleanly
+gmove stop
+
+# Stop a specific operation
+gmove stop 42
+```
+Sends a graceful termination signal (`SIGTERM`) to the background worker process. All local files are preserved intact.
 
 ### Retrying Failed Transfers
 ```bash

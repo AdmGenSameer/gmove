@@ -22,8 +22,8 @@ func NewRepository(db *DB) *Repository {
 func (r *Repository) CreateOperation(op *Operation) (int64, error) {
 	query := `
 	INSERT INTO operations (
-		started_at, status, source, destination, total_items, total_files, total_bytes, dry_run, notes
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		started_at, status, source, destination, total_items, total_files, total_bytes, dry_run, pid, notes
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	res, err := r.db.Exec(query,
 		op.StartedAt,
@@ -34,6 +34,7 @@ func (r *Repository) CreateOperation(op *Operation) (int64, error) {
 		op.TotalFiles,
 		op.TotalBytes,
 		op.DryRun,
+		op.PID,
 		op.Notes,
 	)
 	if err != nil {
@@ -55,10 +56,17 @@ func (r *Repository) UpdateOperationStatus(opID int64, status constants.Status, 
 	return err
 }
 
+// UpdateOperationPID updates the operating system process ID for a background daemon.
+func (r *Repository) UpdateOperationPID(opID int64, pid int) error {
+	query := `UPDATE operations SET pid = ? WHERE id = ?`
+	_, err := r.db.Exec(query, pid, opID)
+	return err
+}
+
 // GetOperation retrieves an operation by ID.
 func (r *Repository) GetOperation(opID int64) (*Operation, error) {
 	query := `
-	SELECT id, started_at, completed_at, status, source, destination, total_items, total_files, total_bytes, dry_run, notes
+	SELECT id, started_at, completed_at, status, source, destination, total_items, total_files, total_bytes, dry_run, pid, notes
 	FROM operations WHERE id = ?`
 
 	row := r.db.QueryRow(query, opID)
@@ -78,6 +86,7 @@ func (r *Repository) GetOperation(opID int64) (*Operation, error) {
 		&op.TotalFiles,
 		&op.TotalBytes,
 		&op.DryRun,
+		&op.PID,
 		&notes,
 	)
 	if err != nil {
@@ -102,6 +111,20 @@ func (r *Repository) GetOperation(opID int64) (*Operation, error) {
 func (r *Repository) GetLatestOperation() (*Operation, error) {
 	var opID int64
 	err := r.db.QueryRow(`SELECT id FROM operations ORDER BY id DESC LIMIT 1`).Scan(&opID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return r.GetOperation(opID)
+}
+
+// GetRunningOperation retrieves the currently active RUNNING operation with an assigned PID, if any.
+func (r *Repository) GetRunningOperation() (*Operation, error) {
+	var opID int64
+	query := `SELECT id FROM operations WHERE status = ? AND pid > 0 ORDER BY id DESC LIMIT 1`
+	err := r.db.QueryRow(query, string(constants.StatusRunning)).Scan(&opID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -141,7 +164,7 @@ func (r *Repository) ListOperations(limit int) ([]*Operation, error) {
 	}
 
 	query := `
-	SELECT id, started_at, completed_at, status, source, destination, total_items, total_files, total_bytes, dry_run, notes
+	SELECT id, started_at, completed_at, status, source, destination, total_items, total_files, total_bytes, dry_run, pid, notes
 	FROM operations ORDER BY id DESC LIMIT ?`
 
 	rows, err := r.db.Query(query, limit)
@@ -168,6 +191,7 @@ func (r *Repository) ListOperations(limit int) ([]*Operation, error) {
 			&op.TotalFiles,
 			&op.TotalBytes,
 			&op.DryRun,
+			&op.PID,
 			&notes,
 		); err != nil {
 			return nil, err
@@ -180,10 +204,8 @@ func (r *Repository) ListOperations(limit int) ([]*Operation, error) {
 		if notes.Valid {
 			op.Notes = notes.String
 		}
-
 		ops = append(ops, op)
 	}
-
 	return ops, rows.Err()
 }
 

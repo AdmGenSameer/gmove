@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/AdmGenSameer/gmove/internal/config"
 	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/daemon"
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/deletion"
 	"github.com/AdmGenSameer/gmove/internal/lifecycle"
@@ -41,6 +42,7 @@ func run(args []string) error {
 	var remoteOverride string
 	var destOverride string
 	var dryRun bool
+	var workerOpID int64
 
 	fs := flag.NewFlagSet("gmove", flag.ContinueOnError)
 	fs.StringVar(&configPath, "config", "", "Custom path to config.toml")
@@ -49,6 +51,7 @@ func run(args []string) error {
 	fs.StringVar(&remoteOverride, "remote", "", "Override rclone remote")
 	fs.StringVar(&destOverride, "destination", "", "Override remote destination path")
 	fs.BoolVar(&dryRun, "dry-run", false, "Simulate operation without copying or deleting")
+	fs.Int64Var(&workerOpID, "worker-op", 0, "Internal background worker operation ID")
 
 	// Fast-path: Check for help, version, update, or uninstall before attempting to load config or start wizard
 	for i, a := range args {
@@ -129,6 +132,10 @@ func run(args []string) error {
 	defer logger.Close()
 	logger.Infof("cli", "GMOVE v%s started (source: %s, remote: %s, dryRun: %v)", constants.Version, cfg.Source, cfg.RemoteDestination(), dryRun)
 
+	if workerOpID > 0 {
+		return daemon.RunWorker(context.Background(), workerOpID, cfg, repo)
+	}
+
 	rcloneClient := rclone.NewSubprocessClient("")
 
 	// Initialize safety validator & deleter
@@ -152,7 +159,9 @@ func run(args []string) error {
 		case "history":
 			return cmdHistory(repo, subParams)
 		case "resume":
-			return cmdResume(cfg, repo, rcloneClient, subParams)
+			return cmdResume(cfg, repo, rcloneClient, resolvedPath, subParams)
+		case "stop":
+			return cmdStop(repo, subParams)
 		case "retry":
 			return cmdRetry(cfg, repo, rcloneClient, subParams)
 		case "verify":
@@ -190,9 +199,18 @@ func run(args []string) error {
 
 	// Launch Bubble Tea TUI
 	model := tui.NewModel(cfg, repo, rcloneClient, deleter)
+	if resolvedPath != "" {
+		model.SetConfigPath(resolvedPath)
+	}
 	p := tea.NewProgram(model, tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if m, ok := finalModel.(*tui.Model); ok && m.DetachedPID() > 0 {
+		printDetachedBanner(m.DetachedOpID(), m.DetachedPID())
+	}
+	return nil
 }
 
 func printUsage() {
@@ -203,9 +221,10 @@ Usage:
 
 Subcommands:
   scan                   Scan local media library and show available items
-  status                 Show local vs remote status and last migration result
+  status                 Show local vs remote status and active background migration
   history [id]           List migration history or inspect a specific operation
-  resume [id]            Resume an interrupted or incomplete migration
+  resume [id] [-d]       Resume migration (use -d/--detach for background daemon)
+  stop [id]              Stop an active background migration cleanly
   retry [id]             Retry failed files from an operation
   verify [id]            Re-verify transferred files against Google Drive
   logs [flags]           Inspect SQLite audit logs and error history
@@ -222,6 +241,22 @@ Flags:
   --destination PATH     Override remote destination folder path
   --config PATH          Path to custom config.toml
   --dry-run              Simulate operations without transferring or deleting`)
+}
+
+func printDetachedBanner(opID int64, pid int) {
+	fmt.Println("╭────────────────────────────────────────────────────────────╮")
+	fmt.Println("│           GMOVE MIGRATION DETACHED TO BACKGROUND           │")
+	fmt.Println("╰────────────────────────────────────────────────────────────╯")
+	fmt.Println()
+	fmt.Printf("Migration operation #%d is now transferring in the background.\n", opID)
+	fmt.Printf("Worker process PID: %d\n\n", pid)
+	fmt.Println("You can safely close this SSH session or turn off your PC!")
+	fmt.Println()
+	fmt.Println("Helpful commands:")
+	fmt.Println("  • Check progress anytime:   gmove status")
+	fmt.Println("  • Stream live activity logs: gmove logs")
+	fmt.Println("  • Stop background transfer: gmove stop")
+	fmt.Println()
 }
 
 func cmdScan(cfg *config.Config) error {
@@ -283,6 +318,48 @@ func cmdStatus(cfg *config.Config, repo *database.Repository) error {
 	fmt.Println("╰────────────────────────────────────────────────────────────╯")
 	fmt.Println()
 
+	// Check if there is an active running background operation
+	activeOp, err := repo.GetRunningOperation()
+	if err == nil && activeOp != nil {
+		if activeOp.PID > 0 && daemon.IsProcessAlive(activeOp.PID) {
+			fmt.Println("● ACTIVE BACKGROUND MIGRATION")
+			fmt.Printf("  Operation:   #%d\n", activeOp.ID)
+			fmt.Printf("  Worker PID:  %d (Running)\n", activeOp.PID)
+			fmt.Printf("  Destination: %s\n", activeOp.Destination)
+			fmt.Printf("  Started:     %s\n", activeOp.StartedAt.Local().Format("2006-01-02 15:04:05"))
+
+			items, _ := repo.GetTransferItems(activeOp.ID)
+			var verified, failed, transferring, pending int
+			var currentItemName string
+			for _, it := range items {
+				switch it.Status {
+				case constants.StatusVerified, constants.StatusDeleted:
+					verified++
+				case constants.StatusFailed:
+					failed++
+				case constants.StatusTransferring:
+					transferring++
+					currentItemName = it.Name
+				case constants.StatusPending:
+					pending++
+				}
+			}
+			fmt.Printf("  Progress:    %d/%d items verified (%d failed, %d pending)\n", verified, len(items), failed, pending)
+			if currentItemName != "" {
+				fmt.Printf("  Active item: %s\n", currentItemName)
+			}
+			fmt.Println()
+			fmt.Println("  Commands:")
+			fmt.Println("    • Monitor live logs:        gmove logs")
+			fmt.Println("    • Stop background transfer: gmove stop")
+			fmt.Println()
+		} else {
+			// Process died unexpectedly or server rebooted; clean up stale state
+			_ = repo.UpdateOperationStatus(activeOp.ID, constants.StatusInterrupted, nil)
+			_ = repo.UpdateOperationPID(activeOp.ID, 0)
+		}
+	}
+
 	fmt.Printf("Source:      %s\n", cfg.Source)
 	fmt.Printf("Destination: %s\n\n", cfg.RemoteDestination())
 
@@ -306,7 +383,7 @@ func cmdStatus(cfg *config.Config, repo *database.Repository) error {
 	}
 
 	fmt.Printf("Last Operation: #%d\n", lastOp.ID)
-	fmt.Printf("  Started:   %s\n", lastOp.StartedAt.Format(time.RFC822))
+	fmt.Printf("  Started:   %s\n", lastOp.StartedAt.Local().Format("2006-01-02 15:04:05"))
 	fmt.Printf("  Status:    %s\n", lastOp.Status)
 	fmt.Printf("  Transferred: %d files, %s\n", lastOp.TotalFiles, utils.FormatBytes(lastOp.TotalBytes))
 
@@ -374,12 +451,25 @@ func cmdHistory(repo *database.Repository, args []string) error {
 	return nil
 }
 
-func cmdResume(cfg *config.Config, repo *database.Repository, client rclone.RcloneClient, args []string) error {
+func cmdResume(cfg *config.Config, repo *database.Repository, client rclone.RcloneClient, configPath string, args []string) error {
+	var detach bool
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	fs.BoolVar(&detach, "d", false, "Run transfer in background detached daemon")
+	fs.BoolVar(&detach, "detach", false, "Run transfer in background detached daemon")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	remaining := fs.Args()
 	var opID int64
-	if len(args) > 0 {
-		id, err := strconv.ParseInt(args[0], 10, 64)
+	if len(remaining) > 0 {
+		id, err := strconv.ParseInt(remaining[0], 10, 64)
 		if err != nil {
-			return fmt.Errorf("invalid operation ID: %s", args[0])
+			return fmt.Errorf("invalid operation ID: %s", remaining[0])
 		}
 		opID = id
 	} else {
@@ -399,6 +489,19 @@ func cmdResume(cfg *config.Config, repo *database.Repository, client rclone.Rclo
 		return err
 	}
 
+	if op.PID > 0 && daemon.IsProcessAlive(op.PID) {
+		return fmt.Errorf("operation #%d is already running in background (PID: %d). Use 'gmove status' to inspect or 'gmove stop' to halt it", op.ID, op.PID)
+	}
+
+	if detach {
+		pid, err := daemon.SpawnWorker(op.ID, configPath)
+		if err != nil {
+			return fmt.Errorf("failed to detach background worker: %w", err)
+		}
+		printDetachedBanner(op.ID, pid)
+		return nil
+	}
+
 	fmt.Printf("Resuming operation #%d (%s)...\n", op.ID, op.Destination)
 	mgr := transfer.NewManager(cfg, repo, client)
 	return mgr.Execute(context.Background(), op.ID, func(ev transfer.TransferEvent) {
@@ -406,6 +509,68 @@ func cmdResume(cfg *config.Config, repo *database.Repository, client rclone.Rclo
 			fmt.Printf("[%s] %s\n", ev.Type, ev.Item.Name)
 		}
 	})
+}
+
+func cmdStop(repo *database.Repository, args []string) error {
+	var targetOp *database.Operation
+	if len(args) > 0 {
+		opID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid operation ID: %s", args[0])
+		}
+		op, err := repo.GetOperation(opID)
+		if err != nil {
+			return err
+		}
+		targetOp = op
+	} else {
+		op, err := repo.GetRunningOperation()
+		if err != nil {
+			return err
+		}
+		if op == nil {
+			lastOp, _ := repo.GetLatestOperation()
+			if lastOp != nil && lastOp.PID > 0 && daemon.IsProcessAlive(lastOp.PID) {
+				targetOp = lastOp
+			}
+		} else {
+			targetOp = op
+		}
+	}
+
+	if targetOp == nil || targetOp.PID <= 0 || !daemon.IsProcessAlive(targetOp.PID) {
+		if targetOp != nil && targetOp.PID > 0 {
+			_ = repo.UpdateOperationStatus(targetOp.ID, constants.StatusInterrupted, nil)
+			_ = repo.UpdateOperationPID(targetOp.ID, 0)
+		}
+		fmt.Println("No active background migration worker is currently running.")
+		return nil
+	}
+
+	fmt.Printf("Stopping background migration for operation #%d (PID: %d)...\n", targetOp.ID, targetOp.PID)
+	if err := daemon.StopWorker(targetOp.PID); err != nil {
+		return fmt.Errorf("failed to send stop signal to worker: %w", err)
+	}
+
+	stopped := false
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if !daemon.IsProcessAlive(targetOp.PID) {
+			stopped = true
+			break
+		}
+	}
+
+	_ = repo.UpdateOperationStatus(targetOp.ID, constants.StatusInterrupted, nil)
+	_ = repo.UpdateOperationPID(targetOp.ID, 0)
+
+	if stopped {
+		fmt.Printf("✓ Background worker PID %d stopped gracefully.\n", targetOp.PID)
+		fmt.Println("No local files were deleted. You can resume anytime with: gmove resume")
+	} else {
+		fmt.Printf("⚠ Signal sent to worker PID %d. Process should terminate shortly.\n", targetOp.PID)
+	}
+	return nil
 }
 
 func cmdRetry(cfg *config.Config, repo *database.Repository, client rclone.RcloneClient, args []string) error {
