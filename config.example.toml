@@ -1,0 +1,51 @@
+# GMOVE Configuration Template
+# To use: mkdir -p ~/.config/gmove && cp config.example.toml ~/.config/gmove/config.toml
+
+# Default Media Configuration (Movies)
+source = "/mnt/media/movies"
+remote = "gdrive"
+remote_path = "Movies"
+
+database = "~/.local/share/gmove/gmove.db"
+log_file = "~/.local/state/gmove/gmove.log"
+minimum_free_space_warning_gb = 100
+
+# Rclone Performance Settings
+transfers = 4
+checkers = 8
+retries = 3
+low_level_retries = 10
+drive_chunk_size = "64M"
+delete_after_verify = false
+
+# Exclude non-media folders, vaults, and torrent client directories
+ignore_dirs = [
+    "Cloudbackup",
+    "Music",
+    "incomplete",
+    "prowlarr",
+    "sonarr",
+    "radarr",
+    "lost+found",
+    "@eaDir",
+    ".recycle",
+    "#recycle"
+]
+
+# 🎬 Main Movies Library
+[profiles.movies]
+source = "/mnt/media/movies"
+remote = "gdrive"
+remote_path = "Movies"
+
+# 📺 TV Shows Library
+[profiles.shows]
+source = "/mnt/nextcloud-hdd/downloads/torrents/shows"
+remote = "gdrive"
+remote_path = "Shows"
+
+# 📥 Torrent Movies (Direct Migration from Torrents to Google Drive)
+[profiles.torrents]
+source = "/mnt/nextcloud-hdd/downloads/torrents/movies"
+remote = "gdrive"
+remote_path = "Movies"
