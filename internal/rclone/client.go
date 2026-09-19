@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/AdmGenSameer/gmove/internal/logger"
 )
 
 var (
@@ -34,11 +36,14 @@ func (c *SubprocessClient) CheckExecutable(ctx context.Context) (string, error) 
 	cmd := exec.CommandContext(ctx, c.binaryPath, "version")
 	out, err := cmd.Output()
 	if err != nil {
+		logger.Errorf("rclone", "Executable check failed: %v", err)
 		return "", fmt.Errorf("%w: please install rclone: %v", ErrRcloneNotFound, err)
 	}
 	lines := strings.Split(string(out), "\n")
 	if len(lines) > 0 {
-		return strings.TrimSpace(lines[0]), nil
+		ver := strings.TrimSpace(lines[0])
+		logger.Infof("rclone", "Discovered rclone binary: %s (%s)", c.binaryPath, ver)
+		return ver, nil
 	}
 	return "rclone", nil
 }
@@ -55,7 +60,9 @@ func (c *SubprocessClient) ListRemotes(ctx context.Context) ([]string, error) {
 	cmd := exec.CommandContext(ctx, c.binaryPath, "listremotes")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, formatCmdError("failed to list rclone remotes", err)
+		cmdErr := formatCmdError("failed to list rclone remotes", err)
+		logger.Errorf("rclone", "%v", cmdErr)
+		return nil, cmdErr
 	}
 
 	var remotes []string
@@ -66,6 +73,7 @@ func (c *SubprocessClient) ListRemotes(ctx context.Context) ([]string, error) {
 			remotes = append(remotes, strings.TrimSuffix(line, ":"))
 		}
 	}
+	logger.Infof("rclone", "Found %d configured remotes: %s", len(remotes), strings.Join(remotes, ", "))
 	return remotes, nil
 }
 
@@ -75,11 +83,14 @@ func (c *SubprocessClient) AboutRemote(ctx context.Context, remote string) (*Rem
 	cmd := exec.CommandContext(ctx, c.binaryPath, "about", remoteTarget, "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, formatCmdError("failed to query remote storage info", err)
+		cmdErr := formatCmdError("failed to query remote storage info", err)
+		logger.Errorf("rclone", "AboutRemote failed for %s: %v", remoteTarget, cmdErr)
+		return nil, cmdErr
 	}
 
 	var raw map[string]any
 	if err := json.Unmarshal(out, &raw); err != nil {
+		logger.Errorf("rclone", "Failed to parse about JSON for %s: %v", remoteTarget, err)
 		return nil, err
 	}
 
@@ -94,6 +105,7 @@ func (c *SubprocessClient) AboutRemote(ctx context.Context, remote string) (*Rem
 		info.FreeBytes = int64(free)
 	}
 
+	logger.Infof("rclone", "Remote %s capacity - Total: %d, Used: %d, Free: %d", remoteTarget, info.TotalBytes, info.UsedBytes, info.FreeBytes)
 	return info, nil
 }
 
@@ -150,14 +162,17 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 		}
 	}
 
+	logger.Infof("rclone", "Copy starting: %s -> %s", srcPath, dstRemotePath)
 	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
 
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
+		logger.Errorf("rclone", "Failed to open stderr pipe: %v", err)
 		return fmt.Errorf("failed to open stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		logger.Errorf("rclone", "Failed to start rclone process: %v", err)
 		return fmt.Errorf("failed to start rclone process: %w", err)
 	}
 
@@ -182,7 +197,9 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 			}
 			if entry.Level == "error" {
 				lastErrorMessage = entry.Msg
+				logger.Errorf("rclone", "rclone stderr error: %s", entry.Msg)
 				if strings.Contains(entry.Msg, "userRateLimitExceeded") || strings.Contains(entry.Msg, "quotaExceeded") {
+					logger.Errorf("rclone", "750GB daily Google Drive quota or API rate limit exceeded: %s", entry.Msg)
 					return ErrQuotaExceeded
 				}
 			}
@@ -201,19 +218,24 @@ func (c *SubprocessClient) Copy(ctx context.Context, srcPath, dstRemotePath stri
 
 	if err := cmd.Wait(); err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
+			logger.Warnf("rclone", "Copy canceled by context: %s -> %s", srcPath, dstRemotePath)
 			return context.Canceled
 		}
 		if lastErrorMessage != "" {
+			logger.Errorf("rclone", "Copy failed with message (%s -> %s): %s (%v)", srcPath, dstRemotePath, lastErrorMessage, err)
 			return fmt.Errorf("rclone copy failed: %s: %w", lastErrorMessage, err)
 		}
+		logger.Errorf("rclone", "Copy failed (%s -> %s): %v", srcPath, dstRemotePath, err)
 		return fmt.Errorf("rclone copy failed: %w", err)
 	}
 
+	logger.Infof("rclone", "Copy completed successfully: %s -> %s", srcPath, dstRemotePath)
 	return nil
 }
 
 // Check compares source and destination files using rclone check --one-way.
 func (c *SubprocessClient) Check(ctx context.Context, srcPath, dstRemotePath string, oneWay bool) (*CheckResult, error) {
+	logger.Infof("rclone", "Check starting: %s vs %s (oneWay=%v)", srcPath, dstRemotePath, oneWay)
 	args := []string{
 		"check",
 		srcPath,
@@ -227,10 +249,12 @@ func (c *SubprocessClient) Check(ctx context.Context, srcPath, dstRemotePath str
 	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
+		logger.Errorf("rclone", "Failed to open stderr pipe for check: %v", err)
 		return nil, fmt.Errorf("failed to open stderr pipe for check: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		logger.Errorf("rclone", "Failed to start rclone check: %v", err)
 		return nil, fmt.Errorf("failed to start rclone check: %w", err)
 	}
 
@@ -256,10 +280,13 @@ func (c *SubprocessClient) Check(ctx context.Context, srcPath, dstRemotePath str
 	cmdErr := cmd.Wait()
 	if cmdErr != nil {
 		if res.DifferCount > 0 {
+			logger.Warnf("rclone", "Check verification mismatch: %d differing files found between %s and %s", res.DifferCount, srcPath, dstRemotePath)
 			return res, fmt.Errorf("%w: %d differing files found", ErrVerificationMismatch, res.DifferCount)
 		}
+		logger.Errorf("rclone", "rclone check returned error: %v", cmdErr)
 		return res, fmt.Errorf("rclone check returned error: %w", cmdErr)
 	}
 
+	logger.Infof("rclone", "Check verified: %d matching files, 0 differences between %s and %s", res.MatchCount, srcPath, dstRemotePath)
 	return res, nil
 }

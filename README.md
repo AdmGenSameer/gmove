@@ -275,6 +275,25 @@ gmove verify 42
 ```
 Performs a live post-transfer check against Google Drive for all files in operation #42.
 
+### Inspecting Audit & Error Logs
+```bash
+# View recent logs
+gmove logs
+
+# View only errors and warnings
+gmove logs --errors
+
+# Filter by component (rclone, scanner, safety, transfer, verifier, deleter, cli, tui)
+gmove logs --component rclone
+
+# Filter by operation ID
+gmove logs --op 42
+
+# View custom limit
+gmove logs --limit 100
+```
+All system, rclone, safety, transfer, and deletion events are recorded with zero-loss SQLite WAL storage.
+
 ### Dry Run Simulation
 Add `--dry-run` to any command to simulate discovery, planning, and transfer without modifying local or remote storage:
 ```bash
@@ -317,6 +336,7 @@ gmove/
 │   ├── constants/          # Status enums, file extensions, paths
 │   ├── database/           # SQLite repository, WAL mode, migrations
 │   ├── deletion/           # Gated Deleter (ONLY component allowed to unlink)
+│   ├── logger/             # Async buffered structured logger to SQLite WAL
 │   ├── rclone/             # Subprocess adapter with async JSON stats parser
 │   ├── safety/             # Path confinement and identity drift validator
 │   ├── scanner/            # Media discovery, folder grouping, range selection

@@ -15,6 +15,7 @@ import (
 	"github.com/AdmGenSameer/gmove/internal/constants"
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/deletion"
+	"github.com/AdmGenSameer/gmove/internal/logger"
 	"github.com/AdmGenSameer/gmove/internal/rclone"
 	"github.com/AdmGenSameer/gmove/internal/safety"
 	"github.com/AdmGenSameer/gmove/internal/scanner"
@@ -117,11 +118,16 @@ func run(args []string) error {
 	defer db.Close()
 
 	repo := database.NewRepository(db)
+	logger.Init(repo)
+	defer logger.Close()
+	logger.Infof("cli", "GMOVE v%s started (source: %s, remote: %s, dryRun: %v)", constants.Version, cfg.Source, cfg.RemoteDestination(), dryRun)
+
 	rcloneClient := rclone.NewSubprocessClient("")
 
 	// Initialize safety validator & deleter
 	val, err := safety.NewValidator(cfg.Source)
 	if err != nil {
+		logger.Errorf("cli", "Safety validator initialization failed: %v", err)
 		return fmt.Errorf("safety validation error on source dir: %w", err)
 	}
 	deleter := deletion.NewDeleter(repo, val, cfg.Source)
@@ -144,6 +150,8 @@ func run(args []string) error {
 			return cmdRetry(cfg, repo, rcloneClient, subParams)
 		case "verify":
 			return cmdVerify(cfg, repo, rcloneClient, subParams)
+		case "logs":
+			return cmdLogs(repo, subParams)
 		case "config":
 			return cmdConfig(cfg, resolvedPath, rcloneClient, subParams)
 		case "help", "--help", "-h":
@@ -189,6 +197,7 @@ Subcommands:
   resume [id]            Resume an interrupted or incomplete migration
   retry [id]             Retry failed files from an operation
   verify [id]            Re-verify transferred files against Google Drive
+  logs [flags]           Inspect SQLite audit logs and error history
   config [show|check]    View configuration or test rclone connectivity
   version                Print GMOVE version
   help                   Show this help message
@@ -491,5 +500,83 @@ func cmdConfig(cfg *config.Config, path string, client rclone.RcloneClient, args
 		fmt.Printf("checkers                      = %d\n", cfg.Checkers)
 	}
 
+	return nil
+}
+
+func cmdLogs(repo *database.Repository, args []string) error {
+	var opID int64
+	var level string
+	var component string
+	var onlyErrors bool
+	var limit int
+
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	fs.Int64Var(&opID, "op", 0, "Filter logs by operation ID")
+	fs.StringVar(&level, "level", "", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
+	fs.StringVar(&component, "component", "", "Filter logs by component (rclone, scanner, safety, transfer, etc.)")
+	fs.BoolVar(&onlyErrors, "errors", false, "Show only WARN and ERROR events")
+	fs.IntVar(&limit, "limit", 50, "Maximum number of logs to display")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	logger.Flush()
+
+	filter := database.EventFilter{
+		Level:      level,
+		Component:  component,
+		OnlyErrors: onlyErrors,
+		Limit:      limit,
+	}
+	if opID > 0 {
+		filter.OperationID = &opID
+	}
+
+	records, err := repo.QueryEvents(filter)
+	if err != nil {
+		return fmt.Errorf("failed to query logs from sqlite: %w", err)
+	}
+
+	fmt.Println("╭────────────────────────────────────────────────────────────╮")
+	fmt.Println("│                         GMOVE LOGS                         │")
+	fmt.Println("╰────────────────────────────────────────────────────────────╯")
+	fmt.Println()
+
+	if len(records) == 0 {
+		fmt.Println("No log records found matching query criteria.")
+		return nil
+	}
+
+	fmt.Printf("Displaying %d log events (newest first):\n\n", len(records))
+	for _, rec := range records {
+		ts := rec.Timestamp.Local().Format("2006-01-02 15:04:05")
+		opStr := "        "
+		if rec.OperationID != nil {
+			opStr = fmt.Sprintf("op#%-5d", *rec.OperationID)
+		}
+
+		compStr := fmt.Sprintf("[%-8s]", rec.Component)
+
+		var lvlStr string
+		switch rec.Level {
+		case "ERROR":
+			lvlStr = "✗ ERROR"
+		case "WARN":
+			lvlStr = "⚠ WARN "
+		case "INFO":
+			lvlStr = "ℹ INFO "
+		case "DEBUG":
+			lvlStr = "• DEBUG"
+		default:
+			lvlStr = fmt.Sprintf("%-7s", rec.Level)
+		}
+
+		fmt.Printf("%s  %s  %s %s  %s\n", ts, lvlStr, compStr, opStr, rec.Message)
+		if rec.Details != "" {
+			fmt.Printf("    ↳ %s\n", rec.Details)
+		}
+	}
+	fmt.Println()
 	return nil
 }

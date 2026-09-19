@@ -82,6 +82,7 @@ func (db *DB) migrate() error {
 		operation_id INTEGER REFERENCES operations(id) ON DELETE CASCADE,
 		timestamp DATETIME NOT NULL,
 		level TEXT NOT NULL,
+		component TEXT NOT NULL DEFAULT 'system',
 		message TEXT NOT NULL,
 		details TEXT
 	);
@@ -89,8 +90,17 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_transfer_items_op_status ON transfer_items(operation_id, status);
 	CREATE INDEX IF NOT EXISTS idx_transfer_items_rel_path ON transfer_items(relative_path);
 	CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status);
+	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_events_level ON events(level);
+	CREATE INDEX IF NOT EXISTS idx_events_component ON events(component);
+	CREATE INDEX IF NOT EXISTS idx_events_op_level ON events(operation_id, level);
 	`
 
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Safe backward-compatible migration for existing databases
+	_, _ = db.Exec(`ALTER TABLE events ADD COLUMN component TEXT NOT NULL DEFAULT 'system'`)
+	return nil
 }

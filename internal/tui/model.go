@@ -13,6 +13,7 @@ import (
 	"github.com/AdmGenSameer/gmove/internal/config"
 	"github.com/AdmGenSameer/gmove/internal/database"
 	"github.com/AdmGenSameer/gmove/internal/deletion"
+	"github.com/AdmGenSameer/gmove/internal/logger"
 	"github.com/AdmGenSameer/gmove/internal/rclone"
 	"github.com/AdmGenSameer/gmove/internal/scanner"
 	"github.com/AdmGenSameer/gmove/internal/transfer"
@@ -193,9 +194,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ScanCompleteMsg:
 		if msg.Err != nil {
 			m.err = msg.Err
+			logger.Errorf("tui", "Library scan failed: %v", msg.Err)
 		} else {
 			m.allItems = msg.Items
 			m.diskSpace = msg.Disk
+			logger.Infof("tui", "Scan finished: %d media items discovered", len(msg.Items))
 			m.filterAndSort()
 		}
 
@@ -204,6 +207,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.Err
 			m.statusMsg = fmt.Sprintf("Error preparing operation: %v", msg.Err)
 			m.addLog(fmt.Sprintf("[ERROR] Prepare failed: %v", msg.Err))
+			logger.Errorf("tui", "Operation preparation failed: %v", msg.Err)
 			return m, nil
 		}
 		m.activeOp = msg.Op
@@ -216,6 +220,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentFile = "Starting transfer..."
 		m.addLog(fmt.Sprintf("[DB] Operation #%d recorded (%d items, %s)", msg.Op.ID, len(msg.DbItems), utils.FormatBytes(msg.Op.TotalBytes)))
 		m.addLog("[RCLONE] Connecting to remote destination...")
+		logger.For("tui").WithOp(msg.Op.ID).Infof("Transfer screen active for operation #%d (%d items)", msg.Op.ID, len(msg.DbItems))
 
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancelFunc = cancel
@@ -241,9 +246,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DeletionDoneMsg:
 		if msg.Err != nil {
 			m.deleteError = msg.Err.Error()
+			logger.Errorf("tui", "Deletion failed: %v", msg.Err)
 		} else {
 			m.deleteResult = msg.Result
 			m.mode = ViewFinished
+			logger.Infof("tui", "Deletion completed: %d items deleted, %d bytes freed", msg.Result.DeletedCount, msg.Result.TotalBytesFreed)
 		}
 	}
 

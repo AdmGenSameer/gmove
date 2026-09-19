@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AdmGenSameer/gmove/internal/constants"
@@ -354,11 +355,127 @@ func (r *Repository) UpdateItemDeleted(itemID int64, t time.Time) error {
 	return err
 }
 
-// LogEvent records an audit event.
-func (r *Repository) LogEvent(opID *int64, level, message, details string) error {
-	query := `INSERT INTO events (operation_id, timestamp, level, message, details) VALUES (?, ?, ?, ?, ?)`
-	_, err := r.db.Exec(query, opID, time.Now().UTC(), level, message, details)
+// EventRecord represents a log entry stored in the SQLite events table.
+type EventRecord struct {
+	ID          int64     `json:"id"`
+	OperationID *int64    `json:"operation_id,omitempty"`
+	Timestamp   time.Time `json:"timestamp"`
+	Level       string    `json:"level"`
+	Component   string    `json:"component"`
+	Message     string    `json:"message"`
+	Details     string    `json:"details,omitempty"`
+}
+
+// EventFilter specifies search criteria for retrieving event records.
+type EventFilter struct {
+	OperationID *int64
+	Level       string
+	Component   string
+	OnlyErrors  bool
+	Limit       int
+	Offset      int
+}
+
+// LogEvent records an audit event with component namespace.
+func (r *Repository) LogEvent(opID *int64, level, component, message, details string) error {
+	if component == "" {
+		component = "system"
+	}
+	query := `INSERT INTO events (operation_id, timestamp, level, component, message, details) VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := r.db.Exec(query, opID, time.Now().UTC(), level, component, message, details)
 	return err
+}
+
+// LogEventBatch inserts multiple event records efficiently in a single transaction.
+func (r *Repository) LogEventBatch(events []EventRecord) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO events (operation_id, timestamp, level, component, message, details) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, ev := range events {
+		comp := ev.Component
+		if comp == "" {
+			comp = "system"
+		}
+		ts := ev.Timestamp
+		if ts.IsZero() {
+			ts = time.Now().UTC()
+		}
+		if _, err := stmt.Exec(ev.OperationID, ts, ev.Level, comp, ev.Message, ev.Details); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// QueryEvents retrieves log records based on the given filter.
+func (r *Repository) QueryEvents(filter EventFilter) ([]*EventRecord, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	whereClauses := []string{"1=1"}
+	var args []any
+
+	if filter.OperationID != nil {
+		whereClauses = append(whereClauses, "operation_id = ?")
+		args = append(args, *filter.OperationID)
+	}
+	if filter.OnlyErrors {
+		whereClauses = append(whereClauses, "level IN ('ERROR', 'WARN')")
+	} else if filter.Level != "" {
+		whereClauses = append(whereClauses, "level = ?")
+		args = append(args, strings.ToUpper(filter.Level))
+	}
+	if filter.Component != "" {
+		whereClauses = append(whereClauses, "component = ?")
+		args = append(args, filter.Component)
+	}
+
+	query := fmt.Sprintf(`
+	SELECT id, operation_id, timestamp, level, component, message, details
+	FROM events
+	WHERE %s
+	ORDER BY id DESC
+	LIMIT ? OFFSET ?`, strings.Join(whereClauses, " AND "))
+
+	args = append(args, limit, filter.Offset)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []*EventRecord
+	for rows.Next() {
+		rec := &EventRecord{}
+		var opID sql.NullInt64
+		var details sql.NullString
+		if err := rows.Scan(&rec.ID, &opID, &rec.Timestamp, &rec.Level, &rec.Component, &rec.Message, &details); err != nil {
+			return nil, err
+		}
+		if opID.Valid {
+			rec.OperationID = &opID.Int64
+		}
+		if details.Valid {
+			rec.Details = details.String
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
 }
 
 type rowScanner interface {

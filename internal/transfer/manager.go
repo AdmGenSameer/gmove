@@ -10,6 +10,7 @@ import (
 	"github.com/AdmGenSameer/gmove/internal/config"
 	"github.com/AdmGenSameer/gmove/internal/constants"
 	"github.com/AdmGenSameer/gmove/internal/database"
+	"github.com/AdmGenSameer/gmove/internal/logger"
 	"github.com/AdmGenSameer/gmove/internal/rclone"
 	"github.com/AdmGenSameer/gmove/internal/scanner"
 	"github.com/AdmGenSameer/gmove/internal/utils"
@@ -35,13 +36,16 @@ func NewManager(cfg *config.Config, repo *database.Repository, client rclone.Rcl
 
 // PreflightCheck verifies rclone installation and remote connectivity.
 func (m *Manager) PreflightCheck(ctx context.Context) error {
+	logger.Infof("transfer", "Preflight check running for source: %s, remote: %s", m.cfg.Source, m.cfg.Remote)
 	_, err := m.rcloneClient.CheckExecutable(ctx)
 	if err != nil {
+		logger.Errorf("transfer", "Preflight check failed (rclone missing): %v", err)
 		return err
 	}
 
 	remotes, err := m.rcloneClient.ListRemotes(ctx)
 	if err != nil {
+		logger.Errorf("transfer", "Preflight check failed (list remotes error): %v", err)
 		return fmt.Errorf("failed to query rclone remotes: %w", err)
 	}
 
@@ -55,9 +59,12 @@ func (m *Manager) PreflightCheck(ctx context.Context) error {
 	}
 
 	if !found {
-		return fmt.Errorf("%w: remote '%s' is not in configured remotes (%v)", rclone.ErrRemoteNotConfigured, targetRemote, remotes)
+		err := fmt.Errorf("%w: remote '%s' is not in configured remotes (%v)", rclone.ErrRemoteNotConfigured, targetRemote, remotes)
+		logger.Errorf("transfer", "%v", err)
+		return err
 	}
 
+	logger.Infof("transfer", "Preflight check passed: remote '%s' is valid and accessible", targetRemote)
 	return nil
 }
 
@@ -83,8 +90,11 @@ func (m *Manager) PrepareOperation(selected []*scanner.MediaItem, dryRun bool) (
 
 	opID, err := m.repo.CreateOperation(op)
 	if err != nil {
+		logger.Errorf("transfer", "Failed to create operation in database: %v", err)
 		return nil, nil, fmt.Errorf("failed to create operation in database: %w", err)
 	}
+
+	logger.For("transfer").WithOp(opID).Infof("Created migration operation #%d (%d items, %d files, %d bytes, dryRun=%v)", opID, len(selected), totalFiles, totalBytes, dryRun)
 
 	var dbItems []*database.TransferItem
 	for _, item := range selected {
@@ -157,9 +167,12 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		// If context was cancelled, mark INTERRUPTED
 		if errors.Is(ctx.Err(), context.Canceled) {
 			_ = m.repo.UpdateOperationStatus(opID, constants.StatusInterrupted, nil)
-			_ = m.repo.LogEvent(&opID, "WARN", "Operation interrupted by user", "")
+			_ = m.repo.LogEvent(&opID, "WARN", "transfer", "Operation interrupted by user", "")
+			logger.For("transfer").WithOp(opID).Warn("Operation interrupted by user")
 		}
 	}()
+
+	logger.For("transfer").WithOp(opID).Infof("Executing batch of %d items (total: %s)", len(items), utils.FormatBytes(op.TotalBytes))
 
 	if eventCallback != nil {
 		eventCallback(TransferEvent{
@@ -183,6 +196,8 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+
+		logger.For("transfer").WithOp(opID).Infof("Starting transfer for item %d/%d: %s (%s)", idx+1, len(items), item.Name, utils.FormatBytes(item.SizeBytes))
 
 		// Notify item started
 		if eventCallback != nil {
@@ -226,7 +241,8 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 			failedCount++
 			errStr := copyErr.Error()
 			_ = m.repo.UpdateItemStatus(item.ID, constants.StatusFailed, constants.VerifError, errStr)
-			_ = m.repo.LogEvent(&opID, "ERROR", "Transfer failed", fmt.Sprintf("Item %s: %s", item.RelativePath, errStr))
+			_ = m.repo.LogEvent(&opID, "ERROR", "transfer", "Transfer failed", fmt.Sprintf("Item %s: %s", item.RelativePath, errStr))
+			logger.For("transfer").WithOp(opID).Errorf("Transfer failed for item %s: %s", item.RelativePath, errStr)
 
 			if eventCallback != nil {
 				eventCallback(TransferEvent{
@@ -246,6 +262,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		// Transfer completed: transition to TRANSFERRED
 		now := time.Now().UTC()
 		_ = m.repo.UpdateItemTransferred(item.ID, now)
+		logger.For("transfer").WithOp(opID).Infof("Transfer finished for item %s, starting verification", item.Name)
 		if eventCallback != nil {
 			eventCallback(TransferEvent{
 				Type:           EventItemTransferred,
@@ -274,6 +291,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		verifErr := m.verifier.VerifyItem(ctx, item, remoteDest)
 		if verifErr != nil {
 			failedCount++
+			logger.For("transfer").WithOp(opID).Errorf("Verification failed for item %s: %v", item.Name, verifErr)
 			if eventCallback != nil {
 				eventCallback(TransferEvent{
 					Type:           EventItemFailed,
@@ -289,6 +307,7 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 		} else {
 			verifiedCount++
 			completedBytes += item.SizeBytes
+			logger.For("transfer").WithOp(opID).Infof("Item %s verified successfully", item.Name)
 			if eventCallback != nil {
 				eventCallback(TransferEvent{
 					Type:           EventItemVerified,
@@ -302,6 +321,9 @@ func (m *Manager) Execute(ctx context.Context, opID int64, eventCallback func(Tr
 			}
 		}
 	}
+
+	logger.For("transfer").WithOp(opID).Infof("Batch completed: %d verified, %d failed", verifiedCount, failedCount)
+	_ = m.repo.LogEvent(&opID, "INFO", "transfer", "Batch completed", fmt.Sprintf("Verified: %d, Failed: %d", verifiedCount, failedCount))
 
 	if eventCallback != nil {
 		eventCallback(TransferEvent{

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/AdmGenSameer/gmove/internal/constants"
+	"github.com/AdmGenSameer/gmove/internal/logger"
 )
 
 // Scanner scans the source directory for migration candidates.
@@ -39,8 +40,10 @@ func (s *Scanner) SetIgnoreDirs(dirs []string) {
 
 // Scan discovers all media items (single files and movie directories) directly in the source directory.
 func (s *Scanner) Scan() ([]*MediaItem, error) {
+	logger.Infof("scanner", "Scanning source directory: %s", s.sourceDir)
 	entries, err := os.ReadDir(s.sourceDir)
 	if err != nil {
+		logger.Errorf("scanner", "Failed to read source directory %s: %v", s.sourceDir, err)
 		return nil, fmt.Errorf("failed to read source directory %s: %w", s.sourceDir, err)
 	}
 
@@ -56,6 +59,7 @@ func (s *Scanner) Scan() ([]*MediaItem, error) {
 
 		// Skip ignored directory names (e.g. Cloudbackup, Music, prowlarr)
 		if entry.IsDir() && s.ignoreDirs[strings.ToLower(name)] {
+			logger.Debugf("scanner", "Skipping ignored directory: %s", name)
 			continue
 		}
 
@@ -64,6 +68,7 @@ func (s *Scanner) Scan() ([]*MediaItem, error) {
 		if entry.IsDir() {
 			item, err := s.scanDirectoryBundle(name, fullPath)
 			if err != nil {
+				logger.Warnf("scanner", "Skipping unreadable bundle %s: %v", name, err)
 				continue
 			}
 			if item != nil {
@@ -77,6 +82,7 @@ func (s *Scanner) Scan() ([]*MediaItem, error) {
 
 			item, err := s.scanSingleFile(name, fullPath)
 			if err != nil {
+				logger.Warnf("scanner", "Skipping unreadable file %s: %v", name, err)
 				continue
 			}
 			if item != nil {
@@ -90,6 +96,7 @@ func (s *Scanner) Scan() ([]*MediaItem, error) {
 		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 	})
 
+	logger.Infof("scanner", "Completed scan of %s: %d media items found", s.sourceDir, len(items))
 	return items, nil
 }
 
